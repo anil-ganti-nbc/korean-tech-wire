@@ -1,0 +1,27 @@
+# No source is production-approved.  These are deliberately experimental.
+sources:
+  the_elec:
+    name: "The Elec (디일렉)"
+    status: EXPERIMENTAL
+    enabled: true
+    collector: thelec_html
+    url: https://www.thelec.kr/
+    timezone: Asia/Seoul
+    beats: [semiconductors, displays, batteries, electronics]
+  sk_hynix_newsroom:
+    name: "SK hynix Newsroom"
+    status: EXPERIMENTAL
+    enabled: true
+    collector: rss
+    url: https://news.skhynix.com/feed/
+    timezone: Asia/Seoul
+    beats: [memory, semiconductors, manufacturing]
+  samsung_newsroom_kr:
+    name: "Samsung Newsroom Korea"
+    status: EXPERIMENTAL
+    enabled: true
+    collector: samsung_html
+    url: https://news.samsung.com/kr/
+    timezone: Asia/Seoul
+    beats: [mobile, displays, semiconductors, consumer_electronics]
+

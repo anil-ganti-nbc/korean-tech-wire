@@ -1,0 +1,3 @@
+database_path: var/korean_tech_wire.db
+request_timeout_seconds: 20
+user_agent: "KoreanTechWire/0.1 (experimental research collector; contact: configure-before-production)"

@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+var/*.db
+var/*.log
+var/raw/
+config/config.local.yaml
+.env
+
