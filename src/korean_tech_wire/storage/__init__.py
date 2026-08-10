@@ -1,3 +1,3 @@
-from .database import Database
+from .database import Database, health_failure_classification
 
-__all__ = ["Database"]
+__all__ = ["Database", "health_failure_classification"]

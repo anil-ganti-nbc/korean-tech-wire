@@ -28,6 +28,15 @@ CREATE INDEX source_run_health_source_idx ON source_run_health(source_id, attemp
 def iso(value: datetime | None = None) -> str:
     return (value or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
 
+def health_failure_classification(note: str | None) -> str:
+    """Classify retained historical failures without overwriting their evidence."""
+    text = (note or "").casefold()
+    if any(token in text for token in ("winerror 10013", "failed to connect", "network is unreachable", "connection refused")):
+        return "environment"
+    if any(token in text for token in ("keyboardinterrupt", "intentionally aborted", "development run")):
+        return "intentional_development"
+    return "source_or_parser"
+
 class Database:
     def __init__(self, path: Path): self.path = path
     def connect(self) -> sqlite3.Connection:
@@ -58,6 +67,41 @@ class Database:
     def record_source_health(self, run_id: int, source_id: str, *, duration_ms: int, success: bool, references: int, accepted: int, rejected: int, new: int, existing: int, extraction_failures: int, timestamped: int, note: str | None = None) -> None:
         with self.connect() as con:
             con.execute("INSERT INTO source_run_health(run_id,source_id,attempted_at,duration_ms,success,references_discovered,accepted,rejected,new_articles,existing_articles,extraction_failures,timestamped,health_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", (run_id,source_id,iso(),duration_ms,int(success),references,accepted,rejected,new,existing,extraction_failures,timestamped,note))
+    def health_summary(self, source_ids: Iterable[str] | None = None, recent_limit: int = 20) -> list[dict[str, object]]:
+        requested = list(source_ids or [])
+        with self.connect() as con:
+            query = "SELECT * FROM source_run_health"
+            params: list[object] = []
+            if requested:
+                query += " WHERE source_id IN (" + ",".join("?" for _ in requested) + ")"; params = requested
+            query += " ORDER BY source_id, attempted_at DESC"
+            rows = con.execute(query, params).fetchall()
+        grouped: dict[str, list[sqlite3.Row]] = {}
+        for row in rows: grouped.setdefault(row["source_id"], []).append(row)
+        summaries = []
+        for source_id, history in grouped.items():
+            recent = history[:recent_limit]
+            source_failures = sum(not row["success"] and health_failure_classification(row["health_note"]) == "source_or_parser" for row in history)
+            environment_failures = sum(not row["success"] and health_failure_classification(row["health_note"]) == "environment" for row in history)
+            intentional = sum(not row["success"] and health_failure_classification(row["health_note"]) == "intentional_development" for row in history)
+            consecutive_successes = 0
+            for row in history:
+                if row["success"]: consecutive_successes += 1
+                elif health_failure_classification(row["health_note"]) != "environment": break
+            latest = history[0] if history else None
+            last_success = next((row for row in history if row["success"]), None)
+            last_failure = next((row for row in history if not row["success"]), None)
+            summaries.append({
+                "source_id": source_id, "runs": len(history), "recent_runs": len(recent), "successes": sum(row["success"] for row in history),
+                "source_failures": source_failures, "environment_failures": environment_failures, "intentional_development_failures": intentional,
+                "consecutive_successes": consecutive_successes, "last_success": last_success["attempted_at"] if last_success else None,
+                "last_failure": last_failure["attempted_at"] if last_failure else None, "latest_references": latest["references_discovered"] if latest else None,
+                "latest_accepted": latest["accepted"] if latest else None, "latest_rejected": latest["rejected"] if latest else None,
+                "latest_timestamped": latest["timestamped"] if latest else None, "latest_extraction_failures": latest["extraction_failures"] if latest else None,
+                "unexpected_zero_events": sum("unexpected zero" in (row["health_note"] or "").casefold() for row in history),
+                "recent_notes": [row["health_note"] for row in recent if row["health_note"]],
+            })
+        return summaries
     def persist_articles(self, articles: Iterable[DiscoveredArticle]) -> tuple[int, int]:
         new = existing = 0
         with self.connect() as con:
@@ -74,6 +118,12 @@ class Database:
         with self.connect() as con:
             row = con.execute("SELECT body_original, published_at, record_status FROM articles WHERE source_id=? AND canonical_url=?", (source_id, canonical_url)).fetchone()
             return bool(row and (row["record_status"] != "valid" or row["body_original"] is None or row["published_at"] is None))
+    def stored_published_at(self, source_id: str, canonical_url: str) -> datetime | None:
+        with self.connect() as con:
+            row = con.execute("SELECT published_at FROM articles WHERE source_id=? AND canonical_url=?", (source_id, canonical_url)).fetchone()
+        if not row or not row["published_at"]:
+            return None
+        return datetime.fromisoformat(row["published_at"])
     def quarantine_legacy_samsung_records(self) -> tuple[int, int]:
         """Safely retain ambiguous legacy rows while deleting only URL-proven non-articles."""
         with self.connect() as con:

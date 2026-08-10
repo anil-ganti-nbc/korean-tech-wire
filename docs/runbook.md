@@ -5,6 +5,9 @@ Run from this repository after installing the package:
 ```powershell
 korean-tech-wire source list
 korean-tech-wire run --source the_elec
+korean-tech-wire health
+korean-tech-wire health --source etnews_hardware
+korean-tech-wire soak --cycles 3 --interval-seconds 7200
 korean-tech-wire run
 korean-tech-wire articles latest --limit 10
 korean-tech-wire status
@@ -17,6 +20,10 @@ Codex's execution sandbox can block outbound HTTPS even when the normal Windows 
 Use only the checked-in experimental configuration while testing. Do not add credentials, webhook URLs, cookies, database files, or logs to Git. Be polite: retain the provided user agent, use the default timeout, and do not defeat access controls. For parser changes, add/update an offline fixture and run `pytest` before an experimental live smoke run.
 
 There are deliberately no scheduled tasks or notifications in this bootstrap. Production enablement requires the validation checklist in `source-research.md`.
+
+`health` reports persisted per-source run history, including lifecycle, success/failure classification, latest reference/acceptance/timestamp counts, unexpected-zero events and recent notes. It preserves early sandbox failures and classifies known connection restrictions as environment failures rather than publisher/parser failures.
+
+`soak` is a portable foreground runner, not a scheduler. Each cycle invokes normal collectors against the configured database; stopping it cleanly leaves completed runs in SQLite, and rerunning it safely resumes the evidence history. Its default two-hour interval is intended for a real working-day/multi-day observation, not rapid artificial load.
 
 After deploying the Samsung structural fix, run the one-time, conservative historical cleanup before checking latest articles:
 

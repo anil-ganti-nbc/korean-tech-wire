@@ -53,7 +53,7 @@ def run_collectors(sources: list[Source], settings: Settings, database: Database
             for article in candidates:
                 if (database.has_article(article.source_id, article.canonical_url)
                     and not database.needs_enrichment(article.source_id, article.canonical_url)) or article.body_original:
-                    hydrated.append(article); continue
+                    hydrated.append(replace(article, published_at=database.stored_published_at(article.source_id, article.canonical_url) or article.published_at)); continue
                 try:
                     html = HttpFetcher(settings).get(article.source_url)
                     database.record_fetch(run_id, source.id, article.source_url, "success")

@@ -6,6 +6,7 @@ import sys
 
 from .config import load_settings, load_sources
 from .discovery import run_collectors
+from .soak import run_soak
 from .storage import Database
 
 ROOT = Path.cwd()
@@ -23,6 +24,8 @@ def main() -> None:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("source").add_argument("action", choices=["list"])
     run = commands.add_parser("run"); run.add_argument("--source"); run.add_argument("--production", action="store_true")
+    health = commands.add_parser("health"); health.add_argument("--source"); health.add_argument("--recent", type=int, default=20)
+    soak = commands.add_parser("soak"); soak.add_argument("--cycles", type=int, default=1); soak.add_argument("--interval-seconds", type=int, default=7200); soak.add_argument("--source", action="append", default=[])
     latest = commands.add_parser("articles"); latest.add_argument("action", choices=["latest"]); latest.add_argument("--limit", type=int, default=20)
     commands.add_parser("status")
     maintenance = commands.add_parser("maintenance"); maintenance.add_argument("action", choices=["cleanup-samsung-legacy", "quarantine-theelec-legacy"])
@@ -45,6 +48,23 @@ def main() -> None:
         else:
             marked = database.quarantine_legacy_theelec_records()
             print(f"The Elec broad-index records marked unverified: {marked}")
+    elif args.command == "health":
+        source_map = {source.id: source for source in sources}
+        requested = [args.source] if args.source else list(source_map)
+        for summary in database.health_summary(requested, args.recent):
+            source = source_map.get(summary["source_id"])
+            lifecycle = source.status if source else "UNKNOWN"
+            print(f"{summary['source_id']} [{lifecycle}] runs={summary['runs']} success={summary['successes']} source_failures={summary['source_failures']} environment_failures={summary['environment_failures']} consecutive_successes={summary['consecutive_successes']}")
+            print(f"  latest refs={summary['latest_references']} accepted={summary['latest_accepted']} rejected={summary['latest_rejected']} timestamped={summary['latest_timestamped']} extraction_failures={summary['latest_extraction_failures']} unexpected_zero={summary['unexpected_zero_events']}")
+            print(f"  last_success={summary['last_success'] or '-'} last_failure={summary['last_failure'] or '-'}")
+            for note in summary["recent_notes"][:3]: print(f"  note: {note}")
+    elif args.command == "soak":
+        print(f"Soak: cycles={args.cycles}; interval_seconds={args.interval_seconds}; sources={', '.join(args.source) if args.source else 'all enabled'}")
+        try:
+            summaries = run_soak(sources, settings, database, cycles=args.cycles, interval_seconds=args.interval_seconds, source_ids=args.source)
+        except KeyboardInterrupt:
+            print("Soak interrupted cleanly; completed cycles remain in SQLite health history."); return
+        print(f"Soak completed collector runs: {len(summaries)}")
     else:
         for key, value in database.status().items(): print(f"{key}: {value}")
 
