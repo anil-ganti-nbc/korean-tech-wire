@@ -34,3 +34,11 @@ sources:
     url: https://news.samsung.com/kr/
     timezone: Asia/Seoul
     beats: [mobile, displays, semiconductors, consumer_electronics]
+  lg_display_newsroom:
+    name: "LG Display Latest News Korea"
+    status: EXPERIMENTAL
+    enabled: true
+    collector: lgdisplay_html
+    url: https://www.lgdisplay.com/kor/company/media-center/latest-news
+    timezone: Asia/Seoul
+    beats: [displays, oled, panels, manufacturing]

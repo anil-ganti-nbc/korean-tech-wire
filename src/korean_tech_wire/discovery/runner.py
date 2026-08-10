@@ -42,9 +42,15 @@ def run_collectors(sources: list[Source], settings: Settings, database: Database
             if references == 0 and database.baseline_has_content(source.id):
                 raise CollectorError("unexpected zero references after populated baseline")
             database.record_fetch(run_id, source.id, source.url, "success")
-            # Discovery remains cheap: fetch bodies only for candidates not yet known.
-            hydrated = []
+            # Reject known low-value index cards before fetching a detail page.
+            candidates = []
             for article in articles:
+                decision = classify(source, article)
+                if decision.accepted: candidates.append(article)
+                else: summary.rejected += 1; rejected_count += 1
+            # Discovery remains cheap: fetch bodies only for unseen viable candidates.
+            hydrated = []
+            for article in candidates:
                 if (database.has_article(article.source_id, article.canonical_url)
                     and not database.needs_enrichment(article.source_id, article.canonical_url)) or article.body_original:
                     hydrated.append(article); continue
@@ -52,16 +58,12 @@ def run_collectors(sources: list[Source], settings: Settings, database: Database
                     html = HttpFetcher(settings).get(article.source_url)
                     database.record_fetch(run_id, source.id, article.source_url, "success")
                     details = extract_metadata(html)
-                    hydrated.append(replace(article, body_original=extract_text(html), published_at=details.published_at))
+                    hydrated.append(replace(article, body_original=extract_text(html), published_at=details.published_at or article.published_at))
                 except OSError as error:
                     summary.extraction_failed += 1; extraction_failures += 1
                     database.record_fetch(run_id, source.id, article.source_url, "failure", str(error))
                     hydrated.append(article)
-            accepted = []
-            for article in hydrated:
-                decision = classify(source, article)
-                if decision.accepted: accepted.append(article)
-                else: summary.rejected += 1; rejected_count += 1
+            accepted = hydrated
             accepted_count = len(accepted); summary.accepted += accepted_count
             timestamped = sum(article.published_at is not None for article in accepted); summary.timestamped += timestamped
             new, existing = database.persist_articles(accepted); summary.new += new; summary.existing += existing; summary.succeeded += 1

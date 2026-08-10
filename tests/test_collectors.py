@@ -2,6 +2,7 @@ from datetime import timezone
 from pathlib import Path
 
 from korean_tech_wire.collectors.rss import RssCollector
+from korean_tech_wire.collectors.lgdisplay import LGDisplayCollector
 from korean_tech_wire.collectors.samsung import SamsungNewsroomCollector
 from korean_tech_wire.collectors.thelec import TheElecCollector
 from korean_tech_wire.editorial import classify
@@ -53,3 +54,21 @@ def test_the_elec_editorial_filter_rejects_outside_selected_section():
     irrelevant = DiscoveredArticle("the_elec", "https://example/b", "https://example/b", "배달 제휴", None, RssCollector.now())
     assert classify(source("the_elec", "thelec_html"), relevant).accepted
     assert not classify(source("the_elec", "thelec_html"), irrelevant).accepted
+
+def test_lgdisplay_structured_archive_preserves_korean_canonical_and_kst_date():
+    articles = LGDisplayCollector(source("lg_display_newsroom", "lgdisplay_html"), FixtureFetcher(fixture("lgdisplay_latest_news.html"))).discover()
+    assert len(articles) == 2
+    article = articles[0]
+    assert article.title_original == "PR LG디스플레이, 27인치 720Hz OLED 패널 양산 투자 확대"
+    assert article.canonical_url == "https://example.test/kor/company/media-center/latest-news?contentId=5563"
+    assert article.source_article_id == "5563"
+    assert article.published_at.astimezone(timezone.utc).isoformat() == "2026-08-09T15:00:00+00:00"
+
+def test_lgdisplay_rejects_employer_pr_and_empty_archive_is_safe():
+    articles = LGDisplayCollector(source("lg_display_newsroom", "lgdisplay_html"), FixtureFetcher(fixture("lgdisplay_latest_news.html"))).discover()
+    assert not classify(source("lg_display_newsroom", "lgdisplay_html"), articles[1]).accepted
+    assert LGDisplayCollector(source("lg_display_newsroom", "lgdisplay_html"), FixtureFetcher(fixture("lgdisplay_empty.html"))).discover() == []
+
+def test_lgdisplay_canonical_identity_is_stable_on_repeat_discovery():
+    collector = LGDisplayCollector(source("lg_display_newsroom", "lgdisplay_html"), FixtureFetcher(fixture("lgdisplay_latest_news.html")))
+    assert [article.canonical_url for article in collector.discover()] == [article.canonical_url for article in collector.discover()]

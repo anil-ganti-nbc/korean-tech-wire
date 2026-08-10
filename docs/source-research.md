@@ -67,7 +67,7 @@ The Korean RSS endpoint exposed a rolling window of 10 recent items during repea
 | ETNews | High potential for Korean electronics, semiconductor and component reporting; likely complementary to The Elec. | Public RSS guide exposes `Section901.xml` as a broad “today’s news” stream, but a reliable hardware-only feed was not validated. | DEFERRED: do not ingest the broad stream without section-level signal. |
 | Digital Daily | Potentially useful IT/industry reporting. | No stable structured Korean endpoint validated in this pass. | RESEARCH |
 | ZDNet Korea | Broad technology coverage; likely higher duplicate/noise risk. | Historic FeedBurner references exist, but current publisher-controlled endpoint and hardware focus were not verified. | DEFERRED |
-| LG Display | High primary-source relevance for OLED, panels and manufacturing. | Official Korean media-centre latest-news page is public; structured Korean discovery/pagination endpoint needs fixture-backed validation. | RESEARCH |
+| LG Display | High primary-source relevance for OLED, panels and manufacturing. | Publisher-rendered Korean Latest News archive has stable five-card pages and `contentId` detail identities. | EXPERIMENTAL |
 | LG Electronics | Useful primary product/display source but potentially high PR volume. | Official Korean newsroom is public and Korean-language. | RESEARCH |
 | DART / OpenDART | Highest primary-source proximity for filings, capex and contracts. | Official JSON/XML disclosure-list API requires a 40-character `crtfc_key`; original disclosure XML is available through the official service. | DEFERRED PENDING CREDENTIAL |
 
@@ -78,6 +78,18 @@ OpenDART is technically suitable for an experimental, watchlist-only collector. 
 ### Stage 3 selection rationale
 
 No new source was enabled merely to meet a numerical quota. The current evidence supports further controlled implementation work for a Korean LG Display source and an ETNews hardware subsection only after their exact endpoints and fixtures are validated. This preserves the Wire’s information-advantage goal and avoids converting broad Korean publication volume into noise.
+
+### LG Display Korean Latest News validation — 2026-08-10
+
+LG Display is now the first new Stage 3 **EXPERIMENTAL** source. The selected publisher-controlled discovery URL is <https://www.lgdisplay.com/kor/company/media-center/latest-news>. It returns server-rendered Korean cards in `ul.board_col_list.type2`; the documented, working pagination is `?page=N&size=5`. Each card exposes a Korean title, a publisher date (`YYYY-MM-DD`) and a first-party detail URL of the form `...?contentId=<integer>`. The detail template repeats its title and date in `h3.tit_bv_ns` and `span.date_bv_ns`. The `contentId` is the stable source identity and the full first-party URL is canonical.
+
+Endpoint checks were deliberately conservative. `robots.txt` allows crawling. `latest-news/rss` returned 404; `/rss.xml`, `/feed/`, `/wp-json/`, and `/api/` returned the site shell rather than a verified RSS/Atom, WordPress REST, or JSON news API. `/sitemap.xml` advertises XML but was not a dependable article-discovery source in host inspection (one request reset and the XML-named response was an HTML site page), so it is not used. The structured HTML archive is consequently the simplest reliable publisher surface; it does not depend on aggregators or browser-only application state.
+
+The archive has one visible card flag, `PR`, across both technical and non-technical material, so it is not useful taxonomy. The experimental filter instead rejects clear classes of generic employer/CSR material: training/recruitment, social-contribution/donation, generic ESG-reporting, and employee-branding titles. It retains OLED/LCD/panel technology, monitor/TV/mobile/automotive display, manufacturing, production/capex, supply, and technology-investment announcements. This is intentionally a narrow exclusion rule rather than a large affirmative-keyword net; uncertain corporate material remains available for audit.
+
+The publisher provides a date but no time of day. The collector records that authoritative Korean publication date at KST midnight and normalises it to UTC, retaining the raw publisher date in metadata. It does not infer a missing calendar date or borrow HTTP/sitemap time. This preserves the available source precision while making the record sortable in the current datetime-only model.
+
+Host validation used the normal Windows network because the Codex sandbox blocks outbound HTTPS before TLS/HTTP. First live run: 5 discovered, 4 accepted, 1 rejected, 4 new, 4 timestamped, 0 source failures, 1 isolated detail-fetch failure. Second run: 5 discovered, 4 accepted, 1 rejected, 0 new, 4 existing, 4 timestamped, 0 extraction failures, 0 source failures. The four persisted canonical URLs were unique. Accepted sample and yield assessment: (1) a KRW 3 trillion OLED technology/production-infrastructure investment is a **strong hit**; (2) K-Display 2026 OLED technology exhibition is a **strong hit**; (3) a gaming-OLED monitor performance-study announcement is a **strong hit**; (4) half-year results are **potentially useful** for capacity/financial context. The generic ESG report was rejected as **noise**. Initial rating: **HIGH VALUE** as a primary display/manufacturing source, with the qualification that it is not independent journalism and remains experimental.
 
 ## Live validation record — 2026-08-10
 
