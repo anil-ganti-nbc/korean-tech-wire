@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from datetime import datetime, timezone
 from time import sleep as default_sleep
 
 from .config import Settings
@@ -11,7 +12,7 @@ from .storage import Database
 
 def run_soak(
     sources: Sequence[Source], settings: Settings, database: Database, *, cycles: int,
-    interval_seconds: int, source_ids: Sequence[str] = (), sleep: Callable[[float], None] = default_sleep,
+    interval_seconds: int, source_ids: Sequence[str] = (), if_due: bool = False, sleep: Callable[[float], None] = default_sleep,
 ) -> list[RunSummary]:
     """Run normal collectors in resumable cycles; SQLite health history is the resume state."""
     if cycles < 1:
@@ -23,6 +24,11 @@ def run_soak(
     unknown = set(selected) - known
     if unknown:
         raise ValueError(f"unknown source id(s): {', '.join(sorted(unknown))}")
+    if if_due:
+        last_successes = database.source_last_successes(selected)
+        cutoff = datetime.now(timezone.utc).timestamp() - interval_seconds
+        if len(last_successes) == len(selected) and all(value.timestamp() > cutoff for value in last_successes.values()):
+            return []
     summaries: list[RunSummary] = []
     for cycle in range(cycles):
         for source_id in selected:

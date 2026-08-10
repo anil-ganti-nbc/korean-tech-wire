@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import sys
 
 from .config import load_settings, load_sources
 from .discovery import run_collectors
+from .locking import LockUnavailable, RunLock
 from .soak import run_soak
 from .storage import Database
 
@@ -25,7 +27,8 @@ def main() -> None:
     commands.add_parser("source").add_argument("action", choices=["list"])
     run = commands.add_parser("run"); run.add_argument("--source"); run.add_argument("--production", action="store_true")
     health = commands.add_parser("health"); health.add_argument("--source"); health.add_argument("--recent", type=int, default=20)
-    soak = commands.add_parser("soak"); soak.add_argument("--cycles", type=int, default=1); soak.add_argument("--interval-seconds", type=int, default=7200); soak.add_argument("--source", action="append", default=[])
+    soak = commands.add_parser("soak"); soak.add_argument("--cycles", type=int, default=1); soak.add_argument("--interval-seconds", type=int, default=7200); soak.add_argument("--source", action="append", default=[]); soak.add_argument("--if-due", action="store_true")
+    state = commands.add_parser("state"); state.add_argument("action", choices=["backup", "checkpoint"]); state.add_argument("--destination")
     latest = commands.add_parser("articles"); latest.add_argument("action", choices=["latest"]); latest.add_argument("--limit", type=int, default=20)
     commands.add_parser("status")
     maintenance = commands.add_parser("maintenance"); maintenance.add_argument("action", choices=["cleanup-samsung-legacy", "quarantine-theelec-legacy"])
@@ -36,7 +39,11 @@ def main() -> None:
         if args.production:
             selected = [source for source in sources if source.enabled and source.status == "PRODUCTION"]
             print(f"Production scope: {len(selected)} source(s)" + (" — " + ", ".join(source.id for source in selected) if selected else " (allowlist is empty)"))
-        summary = run_collectors(sources, settings, database, args.source, production_only=args.production)
+        try:
+            with RunLock(settings.database_path.with_name(settings.database_path.name + ".lock")):
+                summary = run_collectors(sources, settings, database, args.source, production_only=args.production)
+        except LockUnavailable as error:
+            raise SystemExit(str(error))
         print(f"Run: {'success' if not summary.failed else 'partial failure'}\nSources attempted: {summary.attempted}; succeeded: {summary.succeeded}; failed: {summary.failed}\nReferences discovered: {summary.discovered}; accepted: {summary.accepted}; rejected: {summary.rejected}\nNew articles: {summary.new}; existing articles: {summary.existing}; timestamped: {summary.timestamped}; extraction failures: {summary.extraction_failed}")
         for error in summary.errors: print(f"ERROR {error}")
     elif args.command == "articles":
@@ -61,10 +68,22 @@ def main() -> None:
     elif args.command == "soak":
         print(f"Soak: cycles={args.cycles}; interval_seconds={args.interval_seconds}; sources={', '.join(args.source) if args.source else 'all enabled'}")
         try:
-            summaries = run_soak(sources, settings, database, cycles=args.cycles, interval_seconds=args.interval_seconds, source_ids=args.source)
+            with RunLock(settings.database_path.with_name(settings.database_path.name + ".lock")):
+                summaries = run_soak(sources, settings, database, cycles=args.cycles, interval_seconds=args.interval_seconds, source_ids=args.source, if_due=args.if_due)
         except KeyboardInterrupt:
             print("Soak interrupted cleanly; completed cycles remain in SQLite health history."); return
-        print(f"Soak completed collector runs: {len(summaries)}")
+        print(f"Soak {'skipped (not due)' if not summaries else 'completed collector runs: ' + str(len(summaries))}")
+    elif args.command == "state":
+        if args.action == "checkpoint":
+            print(json.dumps(database.migration_checkpoint(), ensure_ascii=False, indent=2)); return
+        if not args.destination:
+            raise SystemExit("state backup requires --destination")
+        try:
+            with RunLock(settings.database_path.with_name(settings.database_path.name + ".lock")):
+                database.backup_to(Path(args.destination))
+        except LockUnavailable as error:
+            raise SystemExit(str(error))
+        print(f"SQLite backup created: {args.destination}")
     else:
         for key, value in database.status().items(): print(f"{key}: {value}")
 

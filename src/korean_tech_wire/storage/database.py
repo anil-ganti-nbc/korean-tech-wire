@@ -31,7 +31,7 @@ def iso(value: datetime | None = None) -> str:
 def health_failure_classification(note: str | None) -> str:
     """Classify retained historical failures without overwriting their evidence."""
     text = (note or "").casefold()
-    if any(token in text for token in ("winerror 10013", "failed to connect", "network is unreachable", "connection refused")):
+    if any(token in text for token in ("winerror 10013", "failed to connect", "network is unreachable", "connection refused", "timed out")):
         return "environment"
     if any(token in text for token in ("keyboardinterrupt", "intentionally aborted", "development run")):
         return "intentional_development"
@@ -76,13 +76,21 @@ class Database:
                 query += " WHERE source_id IN (" + ",".join("?" for _ in requested) + ")"; params = requested
             query += " ORDER BY source_id, attempted_at DESC"
             rows = con.execute(query, params).fetchall()
+            error_query = "SELECT source_id, occurred_at, message FROM run_errors"
+            if requested:
+                error_query += " WHERE source_id IN (" + ",".join("?" for _ in requested) + ")"
+            errors = con.execute(error_query, params).fetchall()
         grouped: dict[str, list[sqlite3.Row]] = {}
         for row in rows: grouped.setdefault(row["source_id"], []).append(row)
+        errors_by_source: dict[str, list[sqlite3.Row]] = {}
+        for error in errors: errors_by_source.setdefault(error["source_id"], []).append(error)
         summaries = []
-        for source_id, history in grouped.items():
+        for source_id in sorted(set(grouped) | set(errors_by_source)):
+            history = grouped.get(source_id, [])
+            historical_errors = errors_by_source.get(source_id, [])
             recent = history[:recent_limit]
-            source_failures = sum(not row["success"] and health_failure_classification(row["health_note"]) == "source_or_parser" for row in history)
-            environment_failures = sum(not row["success"] and health_failure_classification(row["health_note"]) == "environment" for row in history)
+            source_failures = sum(not row["success"] and health_failure_classification(row["health_note"]) == "source_or_parser" for row in history) + sum(health_failure_classification(row["message"]) == "source_or_parser" for row in historical_errors)
+            environment_failures = sum(not row["success"] and health_failure_classification(row["health_note"]) == "environment" for row in history) + sum(health_failure_classification(row["message"]) == "environment" for row in historical_errors)
             intentional = sum(not row["success"] and health_failure_classification(row["health_note"]) == "intentional_development" for row in history)
             consecutive_successes = 0
             for row in history:
@@ -91,17 +99,46 @@ class Database:
             latest = history[0] if history else None
             last_success = next((row for row in history if row["success"]), None)
             last_failure = next((row for row in history if not row["success"]), None)
+            historical_last_failure = max((row["occurred_at"] for row in historical_errors), default=None)
             summaries.append({
                 "source_id": source_id, "runs": len(history), "recent_runs": len(recent), "successes": sum(row["success"] for row in history),
                 "source_failures": source_failures, "environment_failures": environment_failures, "intentional_development_failures": intentional,
                 "consecutive_successes": consecutive_successes, "last_success": last_success["attempted_at"] if last_success else None,
-                "last_failure": last_failure["attempted_at"] if last_failure else None, "latest_references": latest["references_discovered"] if latest else None,
+                "last_failure": max(last_failure["attempted_at"] if last_failure else "", historical_last_failure or "") or None, "latest_references": latest["references_discovered"] if latest else None,
                 "latest_accepted": latest["accepted"] if latest else None, "latest_rejected": latest["rejected"] if latest else None,
                 "latest_timestamped": latest["timestamped"] if latest else None, "latest_extraction_failures": latest["extraction_failures"] if latest else None,
                 "unexpected_zero_events": sum("unexpected zero" in (row["health_note"] or "").casefold() for row in history),
                 "recent_notes": [row["health_note"] for row in recent if row["health_note"]],
             })
         return summaries
+    def source_last_successes(self, source_ids: Iterable[str]) -> dict[str, datetime]:
+        requested = list(source_ids)
+        if not requested:
+            return {}
+        with self.connect() as con:
+            rows = con.execute("SELECT source_id, MAX(attempted_at) AS attempted_at FROM source_run_health WHERE success=1 AND source_id IN (" + ",".join("?" for _ in requested) + ") GROUP BY source_id", requested).fetchall()
+        return {row["source_id"]: datetime.fromisoformat(row["attempted_at"]) for row in rows}
+    def backup_to(self, destination: Path) -> None:
+        if destination.exists():
+            raise ValueError(f"backup destination already exists: {destination}")
+        with self.connect() as source:
+            if source.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise RuntimeError("source database integrity check failed")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with sqlite3.connect(destination) as target:
+                source.backup(target)
+        with sqlite3.connect(destination) as check:
+            if check.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise RuntimeError("backup database integrity check failed")
+    def migration_checkpoint(self) -> dict[str, object]:
+        with self.connect() as con:
+            article_counts = {row["source_id"]: row["count"] for row in con.execute("SELECT source_id, COUNT(*) AS count FROM articles GROUP BY source_id")}
+            table_counts = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in ("articles", "runs", "source_run_health", "fetch_attempts", "run_errors")}
+            migrations = [row[0] for row in con.execute("SELECT version FROM schema_migrations ORDER BY version")]
+            integrity = con.execute("PRAGMA integrity_check").fetchone()[0]
+            journal_mode = con.execute("PRAGMA journal_mode").fetchone()[0]
+            duplicates = con.execute("SELECT COUNT(*) - COUNT(DISTINCT source_id || char(0) || canonical_url) FROM articles").fetchone()[0]
+        return {"integrity": integrity, "journal_mode": journal_mode, "migrations": migrations, "table_counts": table_counts, "article_counts": article_counts, "duplicate_canonical_identities": duplicates, "health": self.health_summary()}
     def persist_articles(self, articles: Iterable[DiscoveredArticle]) -> tuple[int, int]:
         new = existing = 0
         with self.connect() as con:
