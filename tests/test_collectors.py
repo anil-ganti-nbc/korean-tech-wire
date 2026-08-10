@@ -3,6 +3,7 @@ from pathlib import Path
 
 from korean_tech_wire.collectors.rss import RssCollector
 from korean_tech_wire.collectors.lgdisplay import LGDisplayCollector
+from korean_tech_wire.collectors.etnews import ETNewsCollector
 from korean_tech_wire.collectors.samsung import SamsungNewsroomCollector
 from korean_tech_wire.collectors.thelec import TheElecCollector
 from korean_tech_wire.editorial import classify
@@ -72,3 +73,25 @@ def test_lgdisplay_rejects_employer_pr_and_empty_archive_is_safe():
 def test_lgdisplay_canonical_identity_is_stable_on_repeat_discovery():
     collector = LGDisplayCollector(source("lg_display_newsroom", "lgdisplay_html"), FixtureFetcher(fixture("lgdisplay_latest_news.html")))
     assert [article.canonical_url for article in collector.discover()] == [article.canonical_url for article in collector.discover()]
+
+def test_etnews_section_card_preserves_korean_url_section_and_kst_timestamp():
+    source_config = Source("etnews_hardware", "ETNews", "EXPERIMENTAL", True, "etnews_html", "https://example.test/", options={"index_urls": [{"url": "https://example.test/section", "section": "semiconductors"}]})
+    articles = ETNewsCollector(source_config, FixtureFetcher(fixture("etnews_section.html"))).discover()
+    assert len(articles) == 2
+    article = articles[0]
+    assert article.title_original == "LX세미콘, 차량용 MCU 'LX61101' 현대차·기아에 공급"
+    assert article.canonical_url == "https://example.test/20260810000234"
+    assert article.source_article_id == "20260810000234" and article.category == "semiconductors"
+    assert article.published_at.astimezone(timezone.utc).isoformat() == "2026-08-10T04:13:00+00:00"
+
+def test_etnews_section_filter_empty_structure_and_repeat_identity_are_safe():
+    source_config = Source("etnews_hardware", "ETNews", "EXPERIMENTAL", True, "etnews_html", "https://example.test/", options={"index_urls": [{"url": "https://example.test/section", "section": "semiconductors"}]})
+    collector = ETNewsCollector(source_config, FixtureFetcher(fixture("etnews_section.html")))
+    articles = collector.discover()
+    assert not classify(source_config, DiscoveredArticle("etnews_hardware", "https://example/a", "https://example/a", "[알림] 기술 포럼", None, collector.now())).accepted
+    assert [article.canonical_url for article in articles] == [article.canonical_url for article in collector.discover()]
+    assert ETNewsCollector(source_config, FixtureFetcher(fixture("etnews_empty.html"))).discover() == []
+
+def test_etnews_detail_open_graph_timestamp_is_authoritative_and_utc_convertible():
+    metadata = extract_metadata(fixture("etnews_article.html"))
+    assert metadata.published_at.astimezone(timezone.utc).isoformat() == "2026-08-10T04:13:26+00:00"

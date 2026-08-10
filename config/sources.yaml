@@ -42,3 +42,21 @@ sources:
     url: https://www.lgdisplay.com/kor/company/media-center/latest-news
     timezone: Asia/Seoul
     beats: [displays, oled, panels, manufacturing]
+  etnews_hardware:
+    name: "ETNews Hardware Sections"
+    status: EXPERIMENTAL
+    enabled: true
+    collector: etnews_html
+    url: https://www.etnews.com/news/section.html?id1=10&id2=061
+    timezone: Asia/Seoul
+    beats: [semiconductors, displays, batteries, components, manufacturing]
+    options:
+      index_urls:
+        - url: https://www.etnews.com/news/section.html?id1=10&id2=061
+          section: semiconductors
+        - url: https://www.etnews.com/news/section.html?id1=10&id2=062
+          section: displays
+        - url: https://www.etnews.com/news/section.html?id1=10&id2=064
+          section: batteries
+        - url: https://www.etnews.com/news/section.html?id1=10&id2=044
+          section: materials_equipment

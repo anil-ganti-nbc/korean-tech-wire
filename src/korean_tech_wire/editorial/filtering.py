@@ -13,6 +13,12 @@ LGDISPLAY_LOW_VALUE_TERMS = (
     "사회공헌", "봉사", "기부", "esg 리포트", "지속가능경영", "임직원",
 )
 
+ETNEWS_LOW_VALUE_TERMS = (
+    "[et톡]", "[알림]", "[포토]", "교육생", "모집", "마라톤", "희망박스", "기부",
+    "취임", "공동대표 체제", "대학", "전문대학원", "정책 전환", "격려", "[et시론]",
+    "연회비", "시장,", "ai 행정", "ipo", "mou", "디스플레이 스쿨", "신용등급", "증권신고서", "인허가",
+)
+
 @dataclass(frozen=True, slots=True)
 class FilterDecision:
     accepted: bool
@@ -28,4 +34,8 @@ def classify(source: Source, article: DiscoveredArticle) -> FilterDecision:
         title = article.title_original.casefold()
         if any(term in title for term in LGDISPLAY_LOW_VALUE_TERMS):
             return FilterDecision(False, "low_value_corporate_or_employer_pr")
+    if source.id == "etnews_hardware":
+        title = article.title_original.casefold()
+        if any(term in title for term in ETNEWS_LOW_VALUE_TERMS):
+            return FilterDecision(False, "low_value_section_item")
     return FilterDecision(True, "accepted")
