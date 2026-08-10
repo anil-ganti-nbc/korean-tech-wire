@@ -9,11 +9,11 @@ sources:
     timezone: Asia/Seoul
     beats: [semiconductors, displays, batteries, electronics]
   sk_hynix_newsroom:
-    name: "SK hynix Newsroom"
+    name: "SK hynix Newsroom Korea"
     status: EXPERIMENTAL
     enabled: true
     collector: rss
-    url: https://news.skhynix.com/feed/
+    url: https://news.skhynix.co.kr/feed/
     timezone: Asia/Seoul
     beats: [memory, semiconductors, manufacturing]
   samsung_newsroom_kr:
@@ -24,4 +24,3 @@ sources:
     url: https://news.samsung.com/kr/
     timezone: Asia/Seoul
     beats: [mobile, displays, semiconductors, consumer_electronics]
-

@@ -20,3 +20,5 @@ Times are persisted as ISO-8601 UTC. Korean publication dates are interpreted as
 - No story clustering, DART integration, entity aliases, English propagation checks, dashboards, webhooks, or Discord integration exist yet.
 
 The current HTML text extraction is intentionally conservative and generic. Site-specific article extractors should be added only after fixture-backed validation.
+
+Live validation has established connectivity and basic discovery for The Elec and Samsung Newsroom Korea, but not source timestamp extraction or clean Samsung article selection. These remain explicit experimental limitations rather than being concealed by run success.

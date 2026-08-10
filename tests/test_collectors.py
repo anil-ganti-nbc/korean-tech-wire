@@ -15,11 +15,11 @@ def source(name, collector):
 
 def fixture(name): return (Path(__file__).parent / "fixtures" / name).read_text(encoding="utf-8")
 
-def test_rss_preserves_korean_and_normalises_timestamp():
-    article = RssCollector(source("sk", "rss"), FixtureFetcher(fixture("sk_hynix_feed.xml"))).discover()[0]
-    assert article.title_original == "SK하이닉스, HBM4 개발"
+def test_korean_rss_preserves_korean_and_normalises_timestamp():
+    article = RssCollector(source("sk", "rss"), FixtureFetcher(fixture("sk_hynix_korean_feed.xml"))).discover()[0]
+    assert article.title_original == "[AI Infrastructure Insight] AI 데이터센터 안에서는 무엇이 달라지고 있는가?"
     assert article.published_at.utcoffset() == timezone.utc.utcoffset(article.published_at)
-    assert article.source_article_id == "post-1"
+    assert article.source_article_id == "https://news.skhynix.co.kr/?p=12345"
 
 def test_the_elec_deduplicates_index_links():
     articles = TheElecCollector(source("elec", "thelec_html"), FixtureFetcher(fixture("thelec_index.html"))).discover()
