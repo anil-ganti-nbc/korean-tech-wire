@@ -62,6 +62,8 @@ The Elec and Samsung Newsroom Korea both passed host-Windows DNS, HTTPS GET and 
 
 The same live inspection initially found no stored source publication timestamp for The Elec or Samsung, and Samsung’s generic parser had persisted category/navigation and media-library links. These findings drove the Stage 1 hardening work: Samsung now accepts only `article_lists` article cards and extracts detail-page JSON-LD; The Elec now polls only its public technology-section indexes and extracts detail-page Open Graph/JSON-LD time. Both remain experimental pending post-change live validation.
 
+Samsung’s remaining timestamp gap was audited after hardening. The 13 active rows are not an unhandled normal-news template: 1 is a `미래동행` multimedia page with blank `NewsArticle.datePublished` and a separate `VideoObject` date; 1 is an overseas video page with only `VideoObject.datePublished`; and 11 are overseas-news pages with no detail-page article time. Their index date remains preserved as raw metadata, but no time is fabricated or borrowed from video metadata.
+
 The Elec source taxonomy observed in the public navigation includes `반도체` (Semiconductors), `디스플레이` (Displays), `배터리` (Batteries), `완성품` (Finished Products), `금융` (Finance), `바이오` (Bio), and other broad sections. Stage 1 requests the first four, but live validation showed the returned pages can still expose broad-index links. Therefore category selection is a useful narrowing signal, not a correctness guarantee; a separate conservative hardware/manufacturing classifier rejects unrelated candidates.
 
 ## Sources consulted

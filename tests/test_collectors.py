@@ -43,6 +43,7 @@ def test_samsung_detail_timestamp_converts_kst_to_utc():
 def test_missing_or_malformed_structured_timestamp_is_not_inferred():
     assert extract_metadata(fixture("samsung_article_missing_date.html")).published_at is None
     assert extract_metadata(fixture("samsung_article_malformed_date.html")).published_at is None
+    assert extract_metadata(fixture("samsung_video_only.html")).published_at is None
 
 def test_the_elec_detail_timestamp_is_extracted():
     assert extract_metadata(fixture("thelec_article.html")).published_at.isoformat() == "2026-08-09T16:50:27+09:00"
