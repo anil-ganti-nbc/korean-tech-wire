@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -11,4 +12,4 @@ class Source:
     url: str
     timezone: str = "Asia/Seoul"
     beats: tuple[str, ...] = field(default_factory=tuple)
-
+    options: dict[str, Any] = field(default_factory=dict)

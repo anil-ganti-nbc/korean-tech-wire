@@ -42,7 +42,7 @@ def load_sources(path: Path) -> list[Source]:
             id=source_id, name=item["name"], status=item["status"],
             enabled=bool(item.get("enabled", False)), collector=item["collector"],
             url=item["url"], timezone=item.get("timezone", "Asia/Seoul"),
-            beats=tuple(item.get("beats", [])),
+            beats=tuple(item.get("beats", [])), options=dict(item.get("options", {})),
         )
         for source_id, item in entries.items()
     ]

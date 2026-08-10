@@ -17,6 +17,9 @@ CREATE TABLE fetch_attempts (id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL, so
 CREATE TABLE articles (id INTEGER PRIMARY KEY, source_id TEXT NOT NULL, source_article_id TEXT, source_url TEXT NOT NULL, canonical_url TEXT NOT NULL, title_original TEXT NOT NULL, title_normalized TEXT NOT NULL, body_original TEXT, author TEXT, category TEXT, published_at TEXT, discovered_at TEXT NOT NULL, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, content_hash TEXT NOT NULL, raw_metadata TEXT NOT NULL, translation_status TEXT NOT NULL DEFAULT 'untranslated', title_english TEXT, summary_english TEXT, UNIQUE(source_id, canonical_url));
 CREATE INDEX articles_seen_idx ON articles(last_seen_at DESC);
 CREATE INDEX articles_source_article_id_idx ON articles(source_id, source_article_id);
+"""), (2, """
+ALTER TABLE articles ADD COLUMN record_status TEXT NOT NULL DEFAULT 'valid';
+CREATE INDEX articles_status_idx ON articles(record_status);
 """)]
 
 def iso(value: datetime | None = None) -> str:
@@ -56,13 +59,26 @@ class Database:
                 try:
                     con.execute("INSERT INTO articles(source_id,source_article_id,source_url,canonical_url,title_original,title_normalized,body_original,author,category,published_at,discovered_at,first_seen_at,last_seen_at,content_hash,raw_metadata) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", values); new += 1
                 except sqlite3.IntegrityError:
-                    con.execute("UPDATE articles SET last_seen_at=?, content_hash=?, raw_metadata=? WHERE source_id=? AND canonical_url=?", (now, digest, json.dumps(article.metadata, ensure_ascii=False), article.source_id, article.canonical_url)); existing += 1
+                    con.execute("UPDATE articles SET source_article_id=?, source_url=?, title_original=?, title_normalized=?, body_original=COALESCE(?, body_original), author=COALESCE(?, author), category=COALESCE(?, category), published_at=COALESCE(?, published_at), last_seen_at=?, content_hash=?, raw_metadata=?, record_status='valid' WHERE source_id=? AND canonical_url=?", (article.source_article_id, article.source_url, article.title_original, normalized, article.body_original, article.author, article.category, iso(article.published_at) if article.published_at else None, now, digest, json.dumps(article.metadata, ensure_ascii=False), article.source_id, article.canonical_url)); existing += 1
         return new, existing
+    def needs_enrichment(self, source_id: str, canonical_url: str) -> bool:
+        with self.connect() as con:
+            row = con.execute("SELECT body_original, published_at, record_status FROM articles WHERE source_id=? AND canonical_url=?", (source_id, canonical_url)).fetchone()
+            return bool(row and (row["record_status"] != "valid" or row["body_original"] is None or row["published_at"] is None))
+    def quarantine_legacy_samsung_records(self) -> tuple[int, int]:
+        """Safely retain ambiguous legacy rows while deleting only URL-proven non-articles."""
+        with self.connect() as con:
+            marked = con.execute("UPDATE articles SET record_status='legacy_unverified' WHERE source_id='samsung_newsroom_kr' AND record_status='valid'").rowcount
+            deleted = con.execute("DELETE FROM articles WHERE source_id='samsung_newsroom_kr' AND record_status='legacy_unverified' AND (canonical_url LIKE '%/medialibrary/%' OR canonical_url LIKE '%/feed/rss' OR canonical_url IN ('https://news.samsung.com/kr/latest', 'https://news.samsung.com/kr/highlights'))").rowcount
+        return marked, deleted
+    def quarantine_legacy_theelec_records(self) -> int:
+        with self.connect() as con:
+            return con.execute("UPDATE articles SET record_status='legacy_unverified' WHERE source_id='the_elec' AND record_status='valid'").rowcount
     def has_article(self, source_id: str, canonical_url: str) -> bool:
         with self.connect() as con:
             return con.execute("SELECT 1 FROM articles WHERE source_id=? AND canonical_url=?", (source_id, canonical_url)).fetchone() is not None
     def latest_articles(self, limit: int = 20) -> list[sqlite3.Row]:
-        with self.connect() as con: return con.execute("SELECT * FROM articles ORDER BY COALESCE(published_at, discovered_at) DESC LIMIT ?", (limit,)).fetchall()
+        with self.connect() as con: return con.execute("SELECT * FROM articles WHERE record_status='valid' ORDER BY COALESCE(published_at, discovered_at) DESC LIMIT ?", (limit,)).fetchall()
     def status(self) -> dict[str, int]:
         with self.connect() as con:
             return {"articles": con.execute("SELECT COUNT(*) FROM articles").fetchone()[0], "runs": con.execute("SELECT COUNT(*) FROM runs").fetchone()[0], "errors": con.execute("SELECT COUNT(*) FROM run_errors").fetchone()[0]}

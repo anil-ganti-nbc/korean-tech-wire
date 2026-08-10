@@ -4,6 +4,9 @@ from pathlib import Path
 from korean_tech_wire.collectors.rss import RssCollector
 from korean_tech_wire.collectors.samsung import SamsungNewsroomCollector
 from korean_tech_wire.collectors.thelec import TheElecCollector
+from korean_tech_wire.editorial import classify
+from korean_tech_wire.extraction import extract_metadata
+from korean_tech_wire.models import DiscoveredArticle
 from korean_tech_wire.models import Source
 
 class FixtureFetcher:
@@ -27,4 +30,25 @@ def test_the_elec_deduplicates_index_links():
 
 def test_samsung_skips_navigation_links():
     articles = SamsungNewsroomCollector(source("samsung", "samsung_html"), FixtureFetcher(fixture("samsung_index.html"))).discover()
-    assert [article.title_original for article in articles] == ["새 갤럭시 공개"]
+    assert len(articles) == 1
+    assert articles[0].title_original == "삼성전자, 차세대 메모리 기술 공개"
+    assert articles[0].category == "프레스센터"
+    assert articles[0].metadata["index_date"] == "2026/08/10"
+
+def test_samsung_detail_timestamp_converts_kst_to_utc():
+    metadata = extract_metadata(fixture("samsung_article_valid.html"))
+    assert metadata.published_at.isoformat() == "2026-08-10T10:00:00+09:00"
+    assert metadata.published_at.astimezone(timezone.utc).isoformat() == "2026-08-10T01:00:00+00:00"
+
+def test_missing_or_malformed_structured_timestamp_is_not_inferred():
+    assert extract_metadata(fixture("samsung_article_missing_date.html")).published_at is None
+    assert extract_metadata(fixture("samsung_article_malformed_date.html")).published_at is None
+
+def test_the_elec_detail_timestamp_is_extracted():
+    assert extract_metadata(fixture("thelec_article.html")).published_at.isoformat() == "2026-08-09T16:50:27+09:00"
+
+def test_the_elec_editorial_filter_rejects_outside_selected_section():
+    relevant = DiscoveredArticle("the_elec", "https://example/a", "https://example/a", "HBM 생산 확대", None, RssCollector.now())
+    irrelevant = DiscoveredArticle("the_elec", "https://example/b", "https://example/b", "배달 제휴", None, RssCollector.now())
+    assert classify(source("the_elec", "thelec_html"), relevant).accepted
+    assert not classify(source("the_elec", "thelec_html"), irrelevant).accepted

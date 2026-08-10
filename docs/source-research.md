@@ -60,7 +60,9 @@ Each source remains non-production until source research is complete, repeated l
 
 The Elec and Samsung Newsroom Korea both passed host-Windows DNS, HTTPS GET and live discovery validation: The Elec discovered 65 references and Samsung discovered 26. This supersedes no historical data: earlier `WinError 10013` runs came from the Codex execution sandbox, where outbound HTTPS connections were blocked before TLS/HTTP, while the normal Windows host reached the same endpoints successfully. Those run records remain valid evidence of the execution environment, not source-health failures.
 
-The same live inspection found important parser-quality limits: The Elec and Samsung records currently have no source publication timestamp, so timestamp accuracy is not yet validated. Samsung’s generic index parser persisted category/navigation and media-library links (for example `RSS`, `더보기`, and media albums), so its live parsing is technically successful but not content-clean. Neither issue changes experimental status or permits production enablement.
+The same live inspection initially found no stored source publication timestamp for The Elec or Samsung, and Samsung’s generic parser had persisted category/navigation and media-library links. These findings drove the Stage 1 hardening work: Samsung now accepts only `article_lists` article cards and extracts detail-page JSON-LD; The Elec now polls only its public technology-section indexes and extracts detail-page Open Graph/JSON-LD time. Both remain experimental pending post-change live validation.
+
+The Elec source taxonomy observed in the public navigation includes `반도체` (Semiconductors), `디스플레이` (Displays), `배터리` (Batteries), `완성품` (Finished Products), `금융` (Finance), `바이오` (Bio), and other broad sections. Stage 1 requests the first four, but live validation showed the returned pages can still expose broad-index links. Therefore category selection is a useful narrowing signal, not a correctness guarantee; a separate conservative hardware/manufacturing classifier rejects unrelated candidates.
 
 ## Sources consulted
 

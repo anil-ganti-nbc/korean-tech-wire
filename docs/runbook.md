@@ -17,3 +17,17 @@ Codex's execution sandbox can block outbound HTTPS even when the normal Windows 
 Use only the checked-in experimental configuration while testing. Do not add credentials, webhook URLs, cookies, database files, or logs to Git. Be polite: retain the provided user agent, use the default timeout, and do not defeat access controls. For parser changes, add/update an offline fixture and run `pytest` before an experimental live smoke run.
 
 There are deliberately no scheduled tasks or notifications in this bootstrap. Production enablement requires the validation checklist in `source-research.md`.
+
+After deploying the Samsung structural fix, run the one-time, conservative historical cleanup before checking latest articles:
+
+```powershell
+korean-tech-wire maintenance cleanup-samsung-legacy
+```
+
+It marks old Samsung rows unverified and deletes only rows whose URL itself proves they are media albums, RSS, or known index controls. It intentionally preserves ambiguous historical records instead of guessing that they are invalid.
+
+If migrating data collected before The Elec’s source filter, quarantine rather than delete that broad-index history:
+
+```powershell
+korean-tech-wire maintenance quarantine-theelec-legacy
+```

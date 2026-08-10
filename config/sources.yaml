@@ -8,6 +8,16 @@ sources:
     url: https://www.thelec.kr/
     timezone: Asia/Seoul
     beats: [semiconductors, displays, batteries, electronics]
+    options:
+      index_urls:
+        - url: https://www.thelec.kr/news/articleList.html?sc_section_code=S1N2&view_type=sm
+          section: semiconductors
+        - url: https://www.thelec.kr/news/articleList.html?sc_section_code=S1N4&view_type=sm
+          section: displays
+        - url: https://www.thelec.kr/news/articleList.html?sc_section_code=S1N9&view_type=sm
+          section: batteries
+        - url: https://www.thelec.kr/news/articleList.html?sc_section_code=S1N7&view_type=sm
+          section: finished_electronics
   sk_hynix_newsroom:
     name: "SK hynix Newsroom Korea"
     status: EXPERIMENTAL
