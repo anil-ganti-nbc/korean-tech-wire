@@ -33,4 +33,10 @@ The Elec discovery polls only its public Semiconductors (`S1N2`), Displays (`S1N
 
 Stage 1 intentionally validates reliable multi-source ingestion and source-specific extraction, not arbitrary protocol diversity. HTML discovery/extraction (with two independently structured publishers) and RSS/XML discovery together exercise the collector contract, run isolation, persistence, timestamps and deduplication. A third mechanism should be added only when a high-value API, sitemap, regulatory, or certification source warrants it; it is not a Stage 1 prerequisite.
 
+## Production semantics
+
+`PRODUCTION` is an explicit allowlist state, not a default. A production source has completed research, fixtures, repeated host validation, canonical/deduplication validation, Korean-original preservation, authoritative timestamp extraction, and failure-isolation checks. `korean-tech-wire run --production` executes only enabled `PRODUCTION` sources; an empty allowlist does not fall back to experimental sources.
+
+Each source attempt records a compact health row: duration, success, discovered/accepted/rejected/new/existing counts, extraction failures, timestamped records and a health note. Zero *new* records is normal. Zero *discovered references* after a populated baseline is treated as an unexpected parser/source-health failure; historical articles are never deleted.
+
 The initial Samsung run pre-dated the structural rule. The explicit maintenance command marks all its old rows `legacy_unverified`, removes only URL-proven noise (`/medialibrary/`, RSS, and known index controls), and preserves ambiguous historical hubs rather than guessing. The equivalent The Elec maintenance command quarantines the broad-index history rather than deleting it. `articles latest` excludes unverified rows.

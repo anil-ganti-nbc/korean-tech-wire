@@ -20,6 +20,9 @@ CREATE INDEX articles_source_article_id_idx ON articles(source_id, source_articl
 """), (2, """
 ALTER TABLE articles ADD COLUMN record_status TEXT NOT NULL DEFAULT 'valid';
 CREATE INDEX articles_status_idx ON articles(record_status);
+"""), (3, """
+CREATE TABLE source_run_health (id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL, source_id TEXT NOT NULL, attempted_at TEXT NOT NULL, duration_ms INTEGER NOT NULL, success INTEGER NOT NULL, references_discovered INTEGER NOT NULL, accepted INTEGER NOT NULL, rejected INTEGER NOT NULL, new_articles INTEGER NOT NULL, existing_articles INTEGER NOT NULL, extraction_failures INTEGER NOT NULL, timestamped INTEGER NOT NULL, health_note TEXT, FOREIGN KEY(run_id) REFERENCES runs(id));
+CREATE INDEX source_run_health_source_idx ON source_run_health(source_id, attempted_at DESC);
 """)]
 
 def iso(value: datetime | None = None) -> str:
@@ -49,6 +52,12 @@ class Database:
         with self.connect() as con: con.execute("UPDATE runs SET finished_at=?, status=?, summary_json=? WHERE id=?", (iso(), status, json.dumps(asdict(summary)), run_id))
     def record_error(self, run_id: int, source_id: str, error_type: str, message: str) -> None:
         with self.connect() as con: con.execute("INSERT INTO run_errors(run_id,source_id,error_type,message,occurred_at) VALUES (?,?,?,?,?)", (run_id,source_id,error_type,message,iso()))
+    def baseline_has_content(self, source_id: str) -> bool:
+        with self.connect() as con:
+            return con.execute("SELECT 1 FROM source_run_health WHERE source_id=? AND success=1 AND references_discovered>0 LIMIT 1", (source_id,)).fetchone() is not None
+    def record_source_health(self, run_id: int, source_id: str, *, duration_ms: int, success: bool, references: int, accepted: int, rejected: int, new: int, existing: int, extraction_failures: int, timestamped: int, note: str | None = None) -> None:
+        with self.connect() as con:
+            con.execute("INSERT INTO source_run_health(run_id,source_id,attempted_at,duration_ms,success,references_discovered,accepted,rejected,new_articles,existing_articles,extraction_failures,timestamped,health_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", (run_id,source_id,iso(),duration_ms,int(success),references,accepted,rejected,new,existing,extraction_failures,timestamped,note))
     def persist_articles(self, articles: Iterable[DiscoveredArticle]) -> tuple[int, int]:
         new = existing = 0
         with self.connect() as con:

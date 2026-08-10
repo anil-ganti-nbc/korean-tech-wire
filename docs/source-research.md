@@ -54,7 +54,11 @@ The two HTML collectors deliberately have different URL/index conventions, while
 
 ## Production gate
 
-Each source remains non-production until source research is complete, repeated live runs show access stability, article dates/timezones and canonical links are validated, Unicode and duplicates are checked, parser fixtures exist, and unexpected-empty behaviour is understood. The production allowlist is currently empty.
+Each source remains non-production until source research is complete, repeated live runs show access stability, article dates/timezones and canonical links are validated, Unicode and duplicates are checked, parser fixtures exist, and unexpected-empty behaviour is understood. The production allowlist began empty and changes only through an explicit documented promotion.
+
+## Stage 2 SK hynix Korea production audit — 2026-08-10
+
+The Korean RSS endpoint exposed a rolling window of 10 recent items during repeated host checks; this is the initial observable baseline, not a historical archive. Items were newest-first, Korean-language, and carried RFC-822 UTC timestamps, canonical Korean `.co.kr` links, and WordPress GUIDs. Multiple entries can share a headline while retaining distinct canonical URLs/GUIDs, so URL identity preserves updates/variants without collapsing them. Repeated live runs were stable and idempotent. SK hynix Korea is therefore the first **PRODUCTION** source; Samsung and The Elec remain **EXPERIMENTAL**.
 
 ## Live validation record — 2026-08-10
 

@@ -22,7 +22,7 @@ def main() -> None:
     parser.add_argument("--config", default="config/config.example.yaml"); parser.add_argument("--sources", default="config/sources.yaml")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("source").add_argument("action", choices=["list"])
-    run = commands.add_parser("run"); run.add_argument("--source")
+    run = commands.add_parser("run"); run.add_argument("--source"); run.add_argument("--production", action="store_true")
     latest = commands.add_parser("articles"); latest.add_argument("action", choices=["latest"]); latest.add_argument("--limit", type=int, default=20)
     commands.add_parser("status")
     maintenance = commands.add_parser("maintenance"); maintenance.add_argument("action", choices=["cleanup-samsung-legacy", "quarantine-theelec-legacy"])
@@ -30,7 +30,10 @@ def main() -> None:
     if args.command == "source":
         for source in sources: print(f"{source.id:22} {source.status:12} enabled={source.enabled}  {source.collector}  {source.name}")
     elif args.command == "run":
-        summary = run_collectors(sources, settings, database, args.source)
+        if args.production:
+            selected = [source for source in sources if source.enabled and source.status == "PRODUCTION"]
+            print(f"Production scope: {len(selected)} source(s)" + (" — " + ", ".join(source.id for source in selected) if selected else " (allowlist is empty)"))
+        summary = run_collectors(sources, settings, database, args.source, production_only=args.production)
         print(f"Run: {'success' if not summary.failed else 'partial failure'}\nSources attempted: {summary.attempted}; succeeded: {summary.succeeded}; failed: {summary.failed}\nReferences discovered: {summary.discovered}; accepted: {summary.accepted}; rejected: {summary.rejected}\nNew articles: {summary.new}; existing articles: {summary.existing}; timestamped: {summary.timestamped}; extraction failures: {summary.extraction_failed}")
         for error in summary.errors: print(f"ERROR {error}")
     elif args.command == "articles":

@@ -34,3 +34,10 @@ def test_the_elec_historical_records_are_quarantined_not_deleted(tmp_path):
     database.persist_articles([article])
     assert database.quarantine_legacy_theelec_records() == 1
     assert database.status()["articles"] == 1
+
+def test_populated_health_baseline_detects_unexpected_zero_context(tmp_path):
+    database = Database(tmp_path / "wire.db"); database.migrate()
+    assert not database.baseline_has_content("rss")
+    run_id = database.start_run("rss")
+    database.record_source_health(run_id, "rss", duration_ms=1, success=True, references=10, accepted=10, rejected=0, new=0, existing=10, extraction_failures=0, timestamped=10)
+    assert database.baseline_has_content("rss")

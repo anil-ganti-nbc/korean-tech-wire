@@ -20,7 +20,7 @@ sources:
           section: finished_electronics
   sk_hynix_newsroom:
     name: "SK hynix Newsroom Korea"
-    status: EXPERIMENTAL
+    status: PRODUCTION
     enabled: true
     collector: rss
     url: https://news.skhynix.co.kr/feed/
