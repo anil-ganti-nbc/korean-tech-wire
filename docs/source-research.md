@@ -60,6 +60,25 @@ Each source remains non-production until source research is complete, repeated l
 
 The Korean RSS endpoint exposed a rolling window of 10 recent items during repeated host checks; this is the initial observable baseline, not a historical archive. Items were newest-first, Korean-language, and carried RFC-822 UTC timestamps, canonical Korean `.co.kr` links, and WordPress GUIDs. Multiple entries can share a headline while retaining distinct canonical URLs/GUIDs, so URL identity preserves updates/variants without collapsing them. Repeated live runs were stable and idempotent. SK hynix Korea is therefore the first **PRODUCTION** source; Samsung and The Elec remain **EXPERIMENTAL**.
 
+## Stage 3 expansion research — 2026-08-10
+
+| Candidate | Originality / beat value | Access evidence | Decision |
+| --- | --- | --- | --- |
+| ETNews | High potential for Korean electronics, semiconductor and component reporting; likely complementary to The Elec. | Public RSS guide exposes `Section901.xml` as a broad “today’s news” stream, but a reliable hardware-only feed was not validated. | DEFERRED: do not ingest the broad stream without section-level signal. |
+| Digital Daily | Potentially useful IT/industry reporting. | No stable structured Korean endpoint validated in this pass. | RESEARCH |
+| ZDNet Korea | Broad technology coverage; likely higher duplicate/noise risk. | Historic FeedBurner references exist, but current publisher-controlled endpoint and hardware focus were not verified. | DEFERRED |
+| LG Display | High primary-source relevance for OLED, panels and manufacturing. | Official Korean media-centre latest-news page is public; structured Korean discovery/pagination endpoint needs fixture-backed validation. | RESEARCH |
+| LG Electronics | Useful primary product/display source but potentially high PR volume. | Official Korean newsroom is public and Korean-language. | RESEARCH |
+| DART / OpenDART | Highest primary-source proximity for filings, capex and contracts. | Official JSON/XML disclosure-list API requires a 40-character `crtfc_key`; original disclosure XML is available through the official service. | DEFERRED PENDING CREDENTIAL |
+
+### DART feasibility
+
+OpenDART is technically suitable for an experimental, watchlist-only collector. The official disclosure-list API supports company/date/type filters and JSON or XML responses; it requires an authentication key obtained from OpenDART. Keep the credential in an environment variable such as `KOREAN_TECH_WIRE_DART_API_KEY` or ignored local configuration—never in Git. A later collector should start with an explicit configurable watchlist (Samsung Electronics, SK hynix, LG Electronics, LG Display, Samsung SDI and selected component firms), retain filing ID/title/date/type and official reference URL, and filter metadata before fetching documents. No credential was provided, so no DART ingestion is enabled.
+
+### Stage 3 selection rationale
+
+No new source was enabled merely to meet a numerical quota. The current evidence supports further controlled implementation work for a Korean LG Display source and an ETNews hardware subsection only after their exact endpoints and fixtures are validated. This preserves the Wire’s information-advantage goal and avoids converting broad Korean publication volume into noise.
+
 ## Live validation record — 2026-08-10
 
 The Elec and Samsung Newsroom Korea both passed host-Windows DNS, HTTPS GET and live discovery validation: The Elec discovered 65 references and Samsung discovered 26. This supersedes no historical data: earlier `WinError 10013` runs came from the Codex execution sandbox, where outbound HTTPS connections were blocked before TLS/HTTP, while the normal Windows host reached the same endpoints successfully. Those run records remain valid evidence of the execution environment, not source-health failures.
