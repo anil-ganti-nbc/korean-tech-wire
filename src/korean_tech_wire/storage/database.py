@@ -23,6 +23,9 @@ CREATE INDEX articles_status_idx ON articles(record_status);
 """), (3, """
 CREATE TABLE source_run_health (id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL, source_id TEXT NOT NULL, attempted_at TEXT NOT NULL, duration_ms INTEGER NOT NULL, success INTEGER NOT NULL, references_discovered INTEGER NOT NULL, accepted INTEGER NOT NULL, rejected INTEGER NOT NULL, new_articles INTEGER NOT NULL, existing_articles INTEGER NOT NULL, extraction_failures INTEGER NOT NULL, timestamped INTEGER NOT NULL, health_note TEXT, FOREIGN KEY(run_id) REFERENCES runs(id));
 CREATE INDEX source_run_health_source_idx ON source_run_health(source_id, attempted_at DESC);
+"""), (4, """
+CREATE TABLE article_feedback (id INTEGER PRIMARY KEY, article_id INTEGER NOT NULL, outcome TEXT NOT NULL, note TEXT, created_at TEXT NOT NULL, FOREIGN KEY(article_id) REFERENCES articles(id));
+CREATE INDEX article_feedback_article_idx ON article_feedback(article_id, created_at DESC);
 """)]
 
 def iso(value: datetime | None = None) -> str:
@@ -175,6 +178,14 @@ class Database:
             return con.execute("SELECT 1 FROM articles WHERE source_id=? AND canonical_url=?", (source_id, canonical_url)).fetchone() is not None
     def latest_articles(self, limit: int = 20) -> list[sqlite3.Row]:
         with self.connect() as con: return con.execute("SELECT * FROM articles WHERE record_status='valid' ORDER BY COALESCE(published_at, discovered_at) DESC LIMIT ?", (limit,)).fetchall()
+    def add_feedback(self, article_id: int, outcome: str, note: str | None = None) -> None:
+        with self.connect() as con:
+            con.execute("INSERT INTO article_feedback(article_id,outcome,note,created_at) VALUES (?,?,?,?)", (article_id, outcome, note, iso()))
+    def feedback_history(self, article_id: int | None = None) -> list[sqlite3.Row]:
+        with self.connect() as con:
+            if article_id is None:
+                return con.execute("SELECT f.*, a.title_original, a.source_id FROM article_feedback f JOIN articles a ON a.id=f.article_id ORDER BY f.created_at DESC").fetchall()
+            return con.execute("SELECT * FROM article_feedback WHERE article_id=? ORDER BY created_at DESC", (article_id,)).fetchall()
     def status(self) -> dict[str, int]:
         with self.connect() as con:
             return {"articles": con.execute("SELECT COUNT(*) FROM articles").fetchone()[0], "runs": con.execute("SELECT COUNT(*) FROM runs").fetchone()[0], "errors": con.execute("SELECT COUNT(*) FROM run_errors").fetchone()[0]}

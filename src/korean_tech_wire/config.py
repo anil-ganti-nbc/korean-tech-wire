@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,8 +27,17 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 def load_settings(config_path: Path) -> Settings:
     data = _load_yaml(config_path)
+    configured_database = Path(data.get("database_path", "var/korean_tech_wire.db"))
+    # The native field-test launcher opts into a dedicated application-data
+    # root. Existing CLI/server runs keep their configured (normally
+    # CWD-relative) SQLite location unchanged when the override is absent.
+    data_dir = os.environ.get("KOREAN_TECH_WIRE_DATA_DIR")
+    if data_dir and configured_database == Path("var/korean_tech_wire.db"):
+        root = Path(data_dir).expanduser().resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        configured_database = root / "korean_tech_wire.db"
     return Settings(
-        database_path=Path(data.get("database_path", "var/korean_tech_wire.db")),
+        database_path=configured_database,
         request_timeout_seconds=int(data.get("request_timeout_seconds", 20)),
         user_agent=str(data.get("user_agent", "KoreanTechWire/0.1")),
     )
