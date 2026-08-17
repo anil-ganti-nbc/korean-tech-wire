@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from time import perf_counter
+from typing import Callable
 from urllib.request import Request, urlopen
 
 from ..collectors import COLLECTORS, CollectorError
@@ -28,13 +29,14 @@ class RunSummary:
     errors: list[str] = field(default_factory=list)
 
 
-def run_collectors(sources: list[Source], settings: Settings, database: Database, source_id: str | None = None, production_only: bool = False) -> RunSummary:
+def run_collectors(sources: list[Source], settings: Settings, database: Database, source_id: str | None = None, production_only: bool = False, progress: Callable[[str, Source, dict[str, object]], None] | None = None) -> RunSummary:
     database.sync_sources(sources)
     run_id = database.start_run(source_id)
     summary = RunSummary()
     for source in sources:
         if not source.enabled or (source_id and source.id != source_id) or (production_only and source.status != "PRODUCTION"): continue
         summary.attempted += 1
+        if progress: progress("started", source, {})
         started = perf_counter(); references = accepted_count = rejected_count = new = existing = timestamped = extraction_failures = 0
         try:
             collector = COLLECTORS[source.collector](source, HttpFetcher(settings))
@@ -68,10 +70,12 @@ def run_collectors(sources: list[Source], settings: Settings, database: Database
             timestamped = sum(article.published_at is not None for article in accepted); summary.timestamped += timestamped
             new, existing = database.persist_articles(accepted); summary.new += new; summary.existing += existing; summary.succeeded += 1
             database.record_source_health(run_id, source.id, duration_ms=int((perf_counter()-started)*1000), success=True, references=references, accepted=accepted_count, rejected=rejected_count, new=new, existing=existing, extraction_failures=extraction_failures, timestamped=timestamped)
+            if progress: progress("succeeded", source, {"discovered": references, "accepted": accepted_count, "new": new, "existing": existing, "extraction_failures": extraction_failures})
         except (CollectorError, OSError, KeyError, ValueError) as error:
             summary.failed += 1; message = f"{source.id}: {type(error).__name__}: {error}"; summary.errors.append(message)
             database.record_error(run_id, source.id, type(error).__name__, str(error))
             database.record_fetch(run_id, source.id, source.url, "failure", str(error))
             database.record_source_health(run_id, source.id, duration_ms=int((perf_counter()-started)*1000), success=False, references=references, accepted=accepted_count, rejected=rejected_count, new=new, existing=existing, extraction_failures=extraction_failures, timestamped=timestamped, note=str(error))
+            if progress: progress("failed", source, {"error": f"{type(error).__name__}: {error}", "discovered": references, "accepted": accepted_count, "new": new})
     database.finish_run(run_id, "success" if not summary.failed else "partial_failure", summary)
     return summary

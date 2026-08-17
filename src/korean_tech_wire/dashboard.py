@@ -4,11 +4,16 @@ from __future__ import annotations
 import html
 import json
 import sys
+import threading
+import time
+from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
 from .config import load_settings, load_sources
+from .discovery import run_collectors
+from .locking import LockUnavailable, RunLock
 from .runtime import revision
 from .storage import Database
 
@@ -17,6 +22,57 @@ ROOT = Path(sys._MEIPASS) if getattr(sys, "frozen", False) and hasattr(sys, "_ME
 CONFIG = ROOT / "config" / "config.example.yaml"
 SOURCES = ROOT / "config" / "sources.yaml"
 OUTCOMES = ("USEFUL", "NOT_USEFUL", "DUPLICATE", "OFF_TOPIC", "NEEDS_REVIEW")
+
+
+class CollectionController:
+    """One manual local run at a time, using the canonical collector core."""
+
+    def __init__(self, database: Database, sources: dict[str, object]):
+        self.database = database
+        self.sources = sources
+        self._guard = threading.Lock()
+        self._state: dict[str, object] = {"status": "IDLE", "running": False, "sources": {}}
+
+    def snapshot(self) -> dict[str, object]:
+        with self._guard:
+            state = json.loads(json.dumps(self._state))
+        if state.get("running") and state.get("started_monotonic"):
+            state["elapsed_seconds"] = round(time.monotonic() - float(state["started_monotonic"]), 1)
+        state.pop("started_monotonic", None)
+        return state
+
+    def start(self, source_id: str | None = None) -> bool:
+        with self._guard:
+            if self._state.get("running"):
+                return False
+            self._state = {
+                "status": "STARTING", "running": True, "current_source": None,
+                "started_monotonic": time.monotonic(), "sources": {}, "error": None,
+            }
+        threading.Thread(target=self._run, args=(source_id,), name="ktw-local-collection", daemon=True).start()
+        return True
+
+    def _progress(self, event: str, source: object, detail: dict[str, object]) -> None:
+        source_id = source.id
+        with self._guard:
+            self._state["current_source"] = source_id if event == "started" else None
+            self._state["status"] = "RUNNING"
+            self._state["sources"][source_id] = {"name": source.name, "status": event.upper(), **detail}
+
+    def _run(self, source_id: str | None) -> None:
+        try:
+            settings = load_settings(CONFIG)
+            lock_path = settings.database_path.with_name(settings.database_path.name + ".lock")
+            with RunLock(lock_path):
+                summary = run_collectors(list(self.sources.values()), settings, self.database, source_id=source_id, progress=self._progress)
+            with self._guard:
+                self._state.update({"status": "COMPLETED" if not summary.failed else "COMPLETED_WITH_ERRORS", "running": False, "current_source": None, "summary": asdict(summary)})
+        except LockUnavailable as error:
+            with self._guard:
+                self._state.update({"status": "LOCKED", "running": False, "current_source": None, "error": str(error)})
+        except Exception as error:
+            with self._guard:
+                self._state.update({"status": "FAILED", "running": False, "current_source": None, "error": f"{type(error).__name__}: {error}"})
 
 
 def e(value: object) -> str:
@@ -80,38 +136,40 @@ def _style() -> str:
 :root{--bg:#08111d;--nav:#0c1727;--card:#111f31;--line:#26374d;--text:#e9eef7;--muted:#9baac0;--blue:#74b7ff;--green:#65df91;--amber:#f2bd4f;--red:#ff7770}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Segoe UI",sans-serif}a{color:#80bfff;text-decoration:none}.app{min-height:100vh;display:grid;grid-template-columns:210px 1fr;grid-template-rows:68px 1fr}header{grid-column:1/3;display:flex;align-items:center;gap:14px;padding:0 20px;background:#0b1524;border-bottom:1px solid var(--line)}.brand{font-size:17px;font-weight:760}.brand small,.muted,small{display:block;color:var(--muted);font-size:11px;font-weight:400}.pill,.badge{display:inline-block;border-radius:5px;font-size:10px;font-weight:800;letter-spacing:.04em;padding:4px 7px}.pill{color:#d5c2ff;background:#25235c;border:1px solid #4842a2}.provenance{color:var(--muted);max-width:460px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.spacer{flex:1}button{border:1px solid #3d4c66;background:#1a2b42;color:#eaf2ff;border-radius:5px;padding:7px 10px;font-weight:700;cursor:pointer}aside{background:var(--nav);border-right:1px solid var(--line);padding:12px}.navtitle{font-size:10px;color:var(--muted);letter-spacing:.08em;margin:15px 8px 5px}.nav{display:block;color:#d6dfed;padding:8px 10px;border-radius:5px;margin:2px 0}.nav.active{background:#302d80;color:#fff;font-weight:700}main{width:100%;max-width:1650px;margin:auto;padding:16px 20px}.summary{display:grid;grid-template-columns:1.35fr repeat(5,1fr);gap:10px}.metric,.card{background:var(--card);border:1px solid var(--line);border-radius:8px}.metric{min-height:87px;padding:12px}.label{font-size:10px;color:var(--muted);font-weight:800;letter-spacing:.06em}.number{font-size:25px;font-weight:780;margin:3px 0}.overall{border-color:#315173}.overall .number{color:var(--blue)}.grid{display:grid;grid-template-columns:minmax(0,3fr) minmax(260px,1fr);gap:13px;margin-top:13px}.card{padding:13px}h2{font-size:15px;margin:0 0 10px}.sub{color:var(--muted);font-size:12px;margin:-5px 0 10px}.lead{padding:11px 0;border-bottom:1px solid #22324a}.lead:last-child{border:0}.headline{display:block;color:#f3f7fe;font-size:15px;font-weight:710;line-height:1.35;margin:4px 0 5px}.lead-meta{display:flex;gap:7px;align-items:center;flex-wrap:wrap;color:var(--muted);font-size:11px}.snippet{color:#bbc8da;font-size:12px;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.badge.production{background:#133f2c;color:var(--green)}.badge.experimental{background:#433514;color:var(--amber)}.badge.healthy,.badge.useful{background:#133f2c;color:var(--green)}.badge.failed,.badge.not-useful,.badge.off-topic{background:#4b252b;color:#ff9a93}.badge.needs-review,.badge.duplicate{background:#453713;color:var(--amber)}.badge.unknown{background:#29364a;color:#cbd6e6}.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.filters select{color:var(--text);background:#0d1a2b;border:1px solid #34465e;border-radius:5px;padding:7px}.source-health{margin-top:13px}.two{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-top:13px}table{width:100%;border-collapse:collapse;font-size:12px}th{text-align:left;color:var(--muted);font-size:10px;letter-spacing:.05em;padding:7px;border-bottom:1px solid var(--line)}td{padding:8px 7px;border-bottom:1px solid #213047;vertical-align:top}.empty{min-height:110px;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center;color:var(--muted)}.empty b{color:#e2eaf5}.detail-title{font-size:22px;line-height:1.36;margin:4px 0 10px}.evidence{white-space:pre-wrap;color:#cad5e5;line-height:1.55;background:#0d1a2b;border:1px solid #26374d;border-radius:6px;padding:12px}.feedback{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}.feedback button{font-size:11px}.footer{color:var(--muted);font-size:11px;text-align:center;margin:16px}@media(max-width:1000px){.app{grid-template-columns:1fr;grid-template-rows:68px auto 1fr}header{grid-column:1}.provenance{max-width:170px}aside{display:flex;overflow:auto;border-right:0;border-bottom:1px solid var(--line);padding:7px}.navtitle{display:none}.nav{white-space:nowrap}.summary,.grid,.two{grid-template-columns:1fr}}</style>"""
 
 
-def render_overview(database: Database, sources: dict[str, object], query: dict[str, list[str]]) -> str:
-    channel = query.get("channel", [""])[0].upper()
-    source_filter = query.get("source", [""])[0]
+def _collection_panel(state: dict[str, object], sources: dict[str, object], empty: bool = False) -> str:
+    running = bool(state.get("running"))
+    options = "".join(f'<option value="{e(source.id)}">{e(source.name)}</option>' for source in sources.values() if source.enabled)
+    message = "No local leads yet.<br><span>Run Korean Tech Wire collectors to populate this field-test database.</span>" if empty else "Runs enabled Korean Tech Wire sources into this Mac’s local field-test DB."
+    suffix = "-empty" if empty else ""
+    return f'''<div class="{'empty ' if empty else ''}collect"><b>{message}</b><form id=collect-form{suffix} data-collect-form><select name=source><option value="">All enabled sources</option>{options}</select> <button id=collect-button{suffix} data-collect-button type=submit {'disabled' if running else ''}>{'RUNNING…' if running else 'COLLECT NOW'}</button></form><div class=run-status id=collection-status{suffix} data-collection-status>{e(state.get("status", "IDLE"))}</div></div>'''
+
+
+def _collection_script() -> str:
+    return '''<script>const forms=[...document.querySelectorAll('[data-collect-form]')],buttons=[...document.querySelectorAll('[data-collect-button]')],boxes=[...document.querySelectorAll('[data-collection-status]')];function show(s){buttons.forEach(b=>{b.disabled=!!s.running;b.textContent=s.running?'RUNNING…':'COLLECT NOW'});let x=[`Status: ${s.status}${s.elapsed_seconds!==undefined?` · ${s.elapsed_seconds}s`:''}`];if(s.current_source)x.push(`Current source: ${s.current_source}`);for(const [id,r] of Object.entries(s.sources||{}))x.push(`${r.name||id}: ${r.status}${r.new!==undefined?` · new ${r.new}, accepted ${r.accepted||0}`:''}${r.error?` — ${r.error}`:''}`);if(s.summary)x.push(`Completed: accepted ${s.summary.accepted}, new ${s.summary.new}, warnings/errors ${s.summary.failed}`);if(s.error)x.push(s.error);boxes.forEach(box=>box.innerHTML=x.map(v=>`<div>${v}</div>`).join(''));return s}async function poll(){try{const s=show(await(await fetch('/collection-status')).json());if(s.running)setTimeout(poll,700);else if(window.wasRunning)setTimeout(()=>location.reload(),700)}catch(e){boxes.forEach(box=>box.textContent=`Status unavailable: ${e}`)}}forms.forEach(f=>f.addEventListener('submit',async ev=>{ev.preventDefault();window.wasRunning=true;buttons.forEach(b=>b.disabled=true);show(await(await fetch('/collect',{method:'POST',body:new URLSearchParams(new FormData(f))})).json());poll()}));poll()</script>'''
+
+
+def render_overview(database: Database, sources: dict[str, object], query: dict[str, list[str]], collection: dict[str, object] | None = None) -> str:
+    state = collection or {"status": "IDLE", "running": False, "sources": {}}
+    channel, source_filter = query.get("channel", [""])[0].upper(), query.get("source", [""])[0]
     articles = _article_rows(database, sources, channel, source_filter)
-    health_map = {item["source_id"]: item for item in database.health_summary(sources)}
-    feedback = database.feedback_history()
-    prod = sum(source.status == "PRODUCTION" for source in sources.values())
-    experimental = sum(source.status == "EXPERIMENTAL" for source in sources.values())
-    failed = sum(1 for item in health_map.values() if item["last_failure"] and not item["last_success"])
+    health_map, feedback = {item["source_id"]: item for item in database.health_summary(sources)}, database.feedback_history()
     lead_rows = []
     for article in articles[:40]:
         excerpt = (article["body_original"] or "").replace("\n", " ").strip()
         lead_rows.append(f'''<article class=lead><div class=lead-meta>{badge(article["channel"])} <b>{e(article["source_name"])}</b> <span>{e(article["published_at"] or article["discovered_at"])}</span> {badge(article["feedback"]) if article["feedback"] else ""}</div><a class=headline href="/articles/{article["id"]}">{e(article["title_original"])}</a><div class=lead-meta>{e(article["category"] or "Uncategorised")} · {external(article["canonical_url"])}</div>{f"<div class=snippet>{e(excerpt)}</div>" if excerpt else ""}</article>''')
-    health_rows = []
-    review_rows = []
+    health_rows, review_rows = [], []
     for source_id, source in sources.items():
-        item = health_map.get(source_id, {})
-        status = "HEALTHY" if item.get("last_success") else ("FAILED" if item.get("last_failure") else "UNKNOWN")
-        note = "; ".join(item.get("recent_notes", [])[:1]) or "—"
-        health_rows.append((f"<b>{e(source.name)}</b><small>{e(source_id)}</small>", badge(source.status), badge(status), e(item.get("last_success") or "—"), e(item.get("latest_accepted") if item.get("latest_accepted") is not None else "—"), e(note)))
-        source_feedback = [row for row in feedback if row["source_id"] == source_id]
-        useful = sum(row["outcome"] == "USEFUL" for row in source_feedback)
-        negative = sum(row["outcome"] in {"NOT_USEFUL", "OFF_TOPIC", "DUPLICATE"} for row in source_feedback)
-        review_rows.append((e(source.name), badge(source.status), e(item.get("last_success") or "—"), e(len([a for a in articles if a["source_id"] == source_id])), e(useful), e(negative)))
-    with database.connect() as con:
-        runs = con.execute("SELECT source_id,started_at,finished_at,status,summary_json FROM runs ORDER BY id DESC LIMIT 20").fetchall()
-    run_rows = []
-    for run in runs:
-        summary = json.loads(run["summary_json"] or "{}")
-        run_rows.append((e(sources.get(run["source_id"]).name if run["source_id"] in sources else run["source_id"] or "all"), e(run["started_at"]), badge((run["status"] or "UNKNOWN").upper()), e(summary.get("discovered", "—")), e(summary.get("new", "—"))))
-    options = "".join(f'<option value="{e(key)}" {"selected" if source_filter == key else ""}>{e(value.name)}</option>' for key, value in sources.items())
-    return f'''<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Korean Tech Wire</title>{_style()}</head><body><div class=app><header><div class=brand>◈ Korean Tech Wire<small>Korean technology newsroom intelligence</small></div><span class=pill>FIELD TEST</span><span class=provenance title="{e(str(database.path.resolve()))}">Revision: {e(revision())}　|　Local DB: {e(database.path.name)}</span><span class=spacer></span><button onclick="location.reload()">↻ Refresh</button></header><aside><a class="nav active" href=/>▤　Overview</a><div class=navtitle>NEWSROOM</div><a class=nav href=#latest>◉　Latest Leads</a><div class=navtitle>SOURCES</div><a class=nav href="/?channel=PRODUCTION">●　Production</a><a class=nav href="/?channel=EXPERIMENTAL">◌　Experimental</a><a class=nav href=#health>♜　Source Health</a><div class=navtitle>REVIEW</div><a class=nav href=#review>✓　Source Review</a><a class=nav href=#feedback>✦　Feedback</a><div class=navtitle>SYSTEM</div><a class=nav href=#runs>◷　Run History</a><a class=nav href=#about>ⓘ　About</a></aside><main><section class=summary><div class="metric overall"><div class=label>OVERALL HEALTH</div><div class=number>{"ATTENTION" if failed else "LOCAL READY"}</div><small>{"Recorded source failure needs review" if failed else "Operational and editorial signals remain separate"}</small></div><div class=metric><div class=label>RECENT LEADS</div><div class=number>{len(articles)}</div><small>Filtered local view</small></div><div class=metric><div class=label>PRODUCTION</div><div class=number>{prod}</div><small>Operational maturity channel</small></div><div class=metric><div class=label>EXPERIMENTAL</div><div class=number>{experimental}</div><small>Under editorial evaluation</small></div><div class=metric><div class=label>NEEDS REVIEW</div><div class=number>{sum(a["feedback"] == "NEEDS_REVIEW" for a in articles)}</div><small>Owner feedback</small></div><div class=metric><div class=label>LATEST RUN</div><div class=number>{e(runs[0]["status"] if runs else "—")}</div><small>{e(runs[0]["started_at"] if runs else "No run recorded")}</small></div></section><section class=grid id=latest><div class=card><h2>Latest Leads</h2><p class=sub>Original Korean titles and evidence are preserved exactly. Production and experimental are source channels, not article-quality labels.</p><form class=filters method=get><select name=channel><option value="">All channels</option><option value=PRODUCTION {"selected" if channel == "PRODUCTION" else ""}>Production</option><option value=EXPERIMENTAL {"selected" if channel == "EXPERIMENTAL" else ""}>Experimental</option></select><select name=source><option value="">All sources</option>{options}</select><button type=submit>Filter</button><a href=/>Clear</a></form>{"".join(lead_rows) if lead_rows else '<div class=empty><b>No leads yet</b><span>Collected Korean technology leads will appear here.</span></div>'}</div><div class=card><h2>Editorial field test</h2><p class=sub>Mark usefulness without changing or deleting the underlying article. Source health is distinct from editorial quality.</p><p><b>Production</b><br><span class=muted>SK hynix Korea is the current approved channel.</span></p><p><b>Experimental</b><br><span class=muted>Samsung, The Elec, LG Display and ETNews are being evaluated for editorial precision.</span></p><p id=about class=muted>Local field-test state only. No collector, delivery, or production control is exposed here.</p></div></section><section class="card source-health" id=health><h2>Source Health</h2>{table(("Source","Channel","Health","Latest success","Accepted","Warning / evidence"),health_rows,"No source runs recorded","Collector health will appear after a local or scheduled run.")}</section><section class=two><section class=card id=review><h2>Source Review</h2>{table(("Source","Channel","Latest success","Visible leads","Useful","Negative"),review_rows,"No source review data","Owner feedback will accumulate here without changing source channels.")}</section><section class=card id=runs><h2>Run History</h2>{table(("Source","Started","Status","Discovered","New"),run_rows,"No runs recorded yet","Run history will appear after collector execution.")}</section></section><section class="card source-health" id=feedback><h2>Recent Editorial Feedback</h2>{table(("Article","Source","Outcome","When"),[(f'<a href="/articles/{row["article_id"]}">{e(row["title_original"])}</a>',e(sources.get(row["source_id"]).name if row["source_id"] in sources else row["source_id"]),badge(row["outcome"]),e(row["created_at"])) for row in feedback[:20]],"No feedback yet","Owner review history will appear as leads are evaluated.")}</section><div class=footer>Field Test Mode · Local data only · Korean text is shown without automatic translation</div></main></div></body></html>'''
+        item = health_map.get(source_id, {}); status = "HEALTHY" if item.get("last_success") else ("FAILED" if item.get("last_failure") else "UNKNOWN")
+        link = f'/?source={quote(source_id)}'
+        health_rows.append((f'<a class=clickable href="{link}#health">{e(source.name)}<small>{e(source_id)}</small></a>', badge(source.status), badge(status), e(item.get("last_success") or "—"), e(item.get("latest_accepted") if item.get("latest_accepted") is not None else "—"), e("; ".join(item.get("recent_notes", [])[:1]) or "—")))
+        sf = [row for row in feedback if row["source_id"] == source_id]
+        review_rows.append((f'<a class=clickable href="{link}#latest">{e(source.name)}</a>', badge(source.status), e(item.get("last_success") or "—"), e(len([a for a in articles if a["source_id"] == source_id])), e(sum(r["outcome"] == "USEFUL" for r in sf)), e(sum(r["outcome"] in {"NOT_USEFUL", "OFF_TOPIC", "DUPLICATE"} for r in sf))))
+    with database.connect() as con: runs = con.execute("SELECT source_id,started_at,status,summary_json FROM runs ORDER BY id DESC LIMIT 20").fetchall()
+    run_rows = [(e(sources.get(r["source_id"]).name if r["source_id"] in sources else r["source_id"] or "all"), e(r["started_at"]), badge((r["status"] or "UNKNOWN").upper()), e(json.loads(r["summary_json"] or "{}").get("discovered", "—")), e(json.loads(r["summary_json"] or "{}").get("new", "—"))) for r in runs]
+    options = "".join(f'<option value="{e(k)}" {"selected" if source_filter == k else ""}>{e(v.name)}</option>' for k, v in sources.items())
+    leads = "".join(lead_rows) if lead_rows else _collection_panel(state, sources, empty=True)
+    style = _style().replace("</style>", ".collect{border:1px solid #514ba8;border-radius:7px;padding:12px;background:#151c3d}.collect form{margin-top:10px}.collect button{background:#554bc4}.collect button:disabled{opacity:.55}.run-status{margin-top:8px}.clickable{display:block;color:#f2f6fc;font-weight:700}.headline:hover,.clickable:hover{text-decoration:underline}.lead:hover{background:#13243a}</style>")
+    return f'''<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Korean Tech Wire</title>{style}</head><body><div class=app><header><div class=brand>◈ Korean Tech Wire<small>Korean technology newsroom intelligence</small></div><span class=pill>LOCAL FIELD TEST</span><span class=provenance title="{e(database.path.resolve())}">Revision: {e(revision())} · Local database only · No external delivery</span><span class=spacer></span><button onclick="location.reload()">↻ Refresh</button></header><aside><a class="nav active" href=/>▤ Overview</a><div class=navtitle>NEWSROOM</div><a class=nav href=#latest>◉ Latest Leads</a><div class=navtitle>SOURCES</div><a class=nav href="/?channel=PRODUCTION">● Production</a><a class=nav href="/?channel=EXPERIMENTAL">◌ Experimental</a><a class=nav href=#health>♜ Source Health</a><div class=navtitle>REVIEW</div><a class=nav href=#review>✓ Source Review</a><a class=nav href=#feedback>✦ Feedback</a><div class=navtitle>SYSTEM</div><a class=nav href=#runs>◷ Run History</a></aside><main><section class=summary><div class="metric overall"><div class=label>OVERALL HEALTH</div><div class=number>LOCAL READY</div><small>Isolated field-test state</small></div><div class=metric><div class=label>RECENT LEADS</div><div class=number>{len(articles)}</div></div><div class=metric><div class=label>PRODUCTION</div><div class=number>{sum(s.status == "PRODUCTION" for s in sources.values())}</div></div><div class=metric><div class=label>EXPERIMENTAL</div><div class=number>{sum(s.status == "EXPERIMENTAL" for s in sources.values())}</div></div><div class=metric><div class=label>NEEDS REVIEW</div><div class=number>{sum(a["feedback"] == "NEEDS_REVIEW" for a in articles)}</div></div><div class=metric><div class=label>LATEST RUN</div><div class=number>{e(runs[0]["status"] if runs else "—")}</div></div></section><section class=grid id=latest><div class=card><h2>Latest Leads</h2><p class=sub>Click a headline for original evidence, article link and feedback.</p><form class=filters method=get><select name=channel><option value="">All channels</option><option value=PRODUCTION>Production</option><option value=EXPERIMENTAL>Experimental</option></select><select name=source><option value="">All sources</option>{options}</select><button>Filter</button><a href=/>Clear</a></form>{leads}</div><div class="card collect"><h2>COLLECT NOW</h2>{_collection_panel(state, sources)}<p class=muted>Manual one-shot only. Uses the canonical runner and run lock. No scheduler and no delivery.</p></div></section><section class="card source-health" id=health><h2>Source Health</h2>{table(("Source","Channel","Health","Latest success","Accepted","Warning / evidence"),health_rows,"No source runs recorded","Click Collect Now to run local sources.")}</section><section class=two><section class=card id=review><h2>Source Review</h2>{table(("Source","Channel","Latest success","Visible leads","Useful","Negative"),review_rows,"No source review data","Feedback accumulates locally.")}</section><section class=card id=runs><h2>Run History</h2>{table(("Source","Started","Status","Discovered","New"),run_rows,"No runs recorded yet","Run history appears after collection.")}</section></section><section class="card source-health" id=feedback><h2>Recent Editorial Feedback</h2>{table(("Article","Source","Outcome","When"),[(f'<a href="/articles/{r["article_id"]}">{e(r["title_original"])}</a>',e(sources.get(r["source_id"]).name if r["source_id"] in sources else r["source_id"]),badge(r["outcome"]),e(r["created_at"])) for r in feedback[:20]],"No feedback yet","Open a lead to review it.")}</section><div class=footer>LOCAL FIELD TEST · Local database only · No external delivery</div></main></div>{_collection_script()}</body></html>'''
 
 
 def render_detail(database: Database, sources: dict[str, object], article_id: int) -> tuple[int, str]:
@@ -129,6 +187,7 @@ def render_detail(database: Database, sources: dict[str, object], article_id: in
 
 def serve(host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPServer:
     database, sources = _database()
+    collection = CollectionController(database, sources)
     class Handler(BaseHTTPRequestHandler):
         def _html(self, status: int, body: str) -> None:
             data = body.encode("utf-8")
@@ -138,13 +197,23 @@ def serve(host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPServer:
             if parsed.path == "/healthz":
                 body = json.dumps({"application": "KoreanTechWire", "status": "ok", "database": str(database.path.resolve()), "revision": revision()}, ensure_ascii=False).encode("utf-8")
                 self.send_response(200); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body); return
-            if parsed.path == "/": self._html(200, render_overview(database, sources, parse_qs(parsed.query))); return
+            if parsed.path == "/collection-status":
+                body = json.dumps(collection.snapshot(), ensure_ascii=False).encode("utf-8")
+                self.send_response(200); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Cache-Control", "no-store"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body); return
+            if parsed.path == "/": self._html(200, render_overview(database, sources, parse_qs(parsed.query), collection.snapshot())); return
             if parsed.path.startswith("/articles/"):
                 try: article_id = int(parsed.path.rsplit("/", 1)[1])
                 except ValueError: self.send_error(404); return
                 status, body = render_detail(database, sources, article_id); self._html(status, body); return
             self.send_error(404)
         def do_POST(self) -> None:
+            if self.path == "/collect":
+                length = int(self.headers.get("Content-Length", "0")); form = parse_qs(self.rfile.read(length).decode("utf-8")); source_id = form.get("source", [""])[0] or None
+                if source_id and source_id not in sources:
+                    self.send_error(400, "unknown source"); return
+                started = collection.start(source_id)
+                body = json.dumps(collection.snapshot(), ensure_ascii=False).encode("utf-8")
+                self.send_response(202 if started else 409); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body); return
             if self.path != "/feedback": self.send_error(404); return
             try:
                 length = int(self.headers.get("Content-Length", "0")); form = parse_qs(self.rfile.read(length).decode("utf-8")); article_id = int(form.get("article_id", [""])[0]); outcome = form.get("outcome", [""])[0]

@@ -1,6 +1,7 @@
 """Thin macOS launcher for the isolated Korean Tech Wire field test."""
 from __future__ import annotations
 
+import json
 import os
 import signal
 import socket
@@ -27,6 +28,10 @@ def wait_for_ready(port: int, timeout: float = 10.0) -> bool:
 
 
 def main() -> None:
+    for name in tuple(os.environ):
+        if any(token in name.upper() for token in ("DISCORD", "WEBHOOK", "DELIVERY", "OUTBOX")):
+            os.environ.pop(name, None)
+    os.environ["KOREAN_TECH_WIRE_FIELD_TEST"] = "1"
     state = Path(os.environ.setdefault("KOREAN_TECH_WIRE_DATA_DIR", str(Path.home() / "Library" / "Application Support" / "Korean Tech Wire"))).expanduser().resolve()
     state.mkdir(parents=True, exist_ok=True)
     with socket.socket() as sock:
@@ -39,10 +44,17 @@ def main() -> None:
         server.shutdown()
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    if wait_for_ready(port):
-        subprocess.Popen(["open", f"http://127.0.0.1:{port}/"])
-    thread.join()
-    server.server_close()
+    marker = state / "runtime" / "dashboard.json"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if wait_for_ready(port):
+            marker.write_text(json.dumps({"pid": os.getpid(), "port": port}), encoding="utf-8")
+            if os.environ.get("KOREAN_TECH_WIRE_NO_BROWSER") != "1":
+                subprocess.Popen(["open", f"http://127.0.0.1:{port}/"])
+        thread.join()
+    finally:
+        server.server_close()
+        marker.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
