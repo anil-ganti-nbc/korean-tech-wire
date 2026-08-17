@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Thread
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -47,8 +50,10 @@ def test_newsroom_empty_state_and_isolated_path(monkeypatch, tmp_path):
     try:
         with urlopen(f"http://127.0.0.1:{server.server_port}/") as response:
             page = response.read().decode("utf-8")
-        assert "No leads yet" in page
-        assert "Collected Korean technology leads" in page
+        assert "No local leads yet" in page
+        assert "Run Korean Tech Wire collectors" in page
+        assert "COLLECT NOW" in page
+        assert "Local database only" in page and "No external delivery" in page
         assert "field state" in load_settings(Path("config/config.example.yaml")).database_path.as_posix()
     finally:
         server.shutdown(); thread.join(); server.server_close()
@@ -66,6 +71,7 @@ def test_newsroom_korean_channels_filters_health_and_detail(monkeypatch, tmp_pat
             filtered = response.read().decode("utf-8")
         assert "삼성전자, 새로운 기술 발표" in filtered
         assert "Source Health" in filtered and "Run History" in filtered
+        assert '/?source=samsung_newsroom_kr#health' in filtered
         with database.connect() as con:
             article_id = con.execute("SELECT id FROM articles WHERE source_id='sk_hynix_newsroom'").fetchone()[0]
         with urlopen(base + f"/articles/{article_id}") as response:
@@ -96,3 +102,48 @@ def test_feedback_persists_without_mutating_article(monkeypatch, tmp_path):
 def test_native_packaging_keeps_dashboard_visible_and_uses_windowed_bundle():
     assert "--windowed" in Path("native/macos/build.sh").read_text()
     assert "from korean_tech_wire.dashboard import serve" in Path("native/macos/launcher.py").read_text()
+    launcher = Path("native/macos/launcher.py").read_text()
+    assert '"DISCORD", "WEBHOOK", "DELIVERY", "OUTBOX"' in launcher
+
+
+def test_collect_now_uses_core_reports_status_refuses_overlap_and_populates(monkeypatch, tmp_path):
+    monkeypatch.setenv("KOREAN_TECH_WIRE_DATA_DIR", str(tmp_path / "interactive"))
+
+    def fake_run(sources, settings, database, source_id=None, production_only=False, progress=None):
+        selected = [source for source in sources if source.enabled and (not source_id or source.id == source_id)]
+        now = datetime.now(timezone.utc)
+        for source in selected:
+            if progress: progress("started", source, {})
+            time.sleep(0.04)
+            database.persist_articles([DiscoveredArticle(source.id, f"https://fixture.invalid/{source.id}", f"https://fixture.invalid/{source.id}", f"Local lead {source.name}", now, now, body_original="Local fixture evidence", category="test")])
+            if progress: progress("succeeded", source, {"discovered": 1, "accepted": 1, "new": 1, "existing": 0})
+        return RunSummary(attempted=len(selected), succeeded=len(selected), discovered=len(selected), accepted=len(selected), new=len(selected))
+
+    monkeypatch.setattr("korean_tech_wire.dashboard.run_collectors", fake_run)
+    server = serve(port=0); thread = Thread(target=server.serve_forever); thread.start()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        first = Request(base + "/collect", data=b"source=", method="POST")
+        with urlopen(first) as response:
+            assert response.status == 202
+        try:
+            urlopen(Request(base + "/collect", data=b"source=", method="POST"))
+            raise AssertionError("overlapping collection was accepted")
+        except HTTPError as error:
+            assert error.code == 409
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            with urlopen(base + "/collection-status") as response:
+                state = json.load(response)
+            if not state["running"]:
+                break
+            time.sleep(0.03)
+        assert state["status"] == "COMPLETED"
+        assert state["summary"]["new"] == 5
+        assert set(state["sources"]) == {"the_elec", "sk_hynix_newsroom", "samsung_newsroom_kr", "lg_display_newsroom", "etnews_hardware"}
+        with urlopen(base + "/") as response:
+            page = response.read().decode("utf-8")
+        assert "Local lead SK hynix Newsroom Korea" in page
+        assert "No local leads yet" not in page
+    finally:
+        server.shutdown(); thread.join(); server.server_close()
