@@ -6,7 +6,7 @@ An independent, Korean-language technology intelligence collector. It is intenti
 
 Stage 4 closed 2026-08-19. **PRODUCTION**: SK hynix Korea, The Elec, ETNews Hardware Sections. **EXPERIMENTAL**: Samsung Newsroom Korea, LG Display. There are no alert integrations.
 
-SK hynix Korea's RSS endpoint is returning `403 Forbidden` from every Hetzner-origin request since 2026-08-10 (see `docs/stage4-editorial-yield.md`); it remains the production control by lifecycle but is not currently collecting. This is an open incident, not a lifecycle change.
+SK hynix Korea's RSS endpoint returns `403 Forbidden` from every Hetzner-origin request since 2026-08-10 — diagnosed as an infrastructure-level (HOST-BLOCKED) block, not a code defect; see `docs/stage4.1-reliability-repair.md`. It remains the production control by lifecycle but is not currently collecting, and now backs off automatically instead of retrying at full frequency (`korean-tech-wire health` shows each source's live `schedule=` state).
 
 ## Install and run
 
@@ -24,4 +24,4 @@ pytest
 
 `config/config.example.yaml` is safe to copy to the ignored `config/config.local.yaml` before changing runtime settings. The SQLite database defaults to `var/korean_tech_wire.db`.
 
-See `docs/runbook.md` for operational use, `docs/source-research.md` for source decisions, `docs/hetzner-migration.md` for safe runtime-state migration, and `docs/stage4-editorial-yield.md` for the Stage 4 closeout record.
+See `docs/runbook.md` for operational use, `docs/source-research.md` for source decisions, `docs/hetzner-migration.md` for safe runtime-state migration, `docs/stage4-editorial-yield.md` for the Stage 4 closeout record, and `docs/stage4.1-reliability-repair.md` for the due-gating/backoff repair and SK hynix diagnosis.

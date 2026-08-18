@@ -8,6 +8,7 @@ import sys
 from .config import load_settings, load_sources
 from .discovery import run_collectors
 from .locking import LockUnavailable, RunLock
+from .scheduling import DEFAULT_INTERVAL_SECONDS, describe
 from .soak import run_soak
 from .storage import Database
 
@@ -64,6 +65,8 @@ def main() -> None:
             print(f"{summary['source_id']} [{lifecycle}] runs={summary['runs']} success={summary['successes']} source_failures={summary['source_failures']} environment_failures={summary['environment_failures']} consecutive_successes={summary['consecutive_successes']}")
             print(f"  latest refs={summary['latest_references']} accepted={summary['latest_accepted']} rejected={summary['latest_rejected']} timestamped={summary['latest_timestamped']} extraction_failures={summary['latest_extraction_failures']} unexpected_zero={summary['unexpected_zero_events']}")
             print(f"  last_success={summary['last_success'] or '-'} last_failure={summary['last_failure'] or '-'}")
+            due_state = database.source_due_state(summary["source_id"])
+            print(f"  schedule={describe(due_state, DEFAULT_INTERVAL_SECONDS)}")
             for note in summary["recent_notes"][:3]: print(f"  note: {note}")
     elif args.command == "soak":
         print(f"Soak: cycles={args.cycles}; interval_seconds={args.interval_seconds}; sources={', '.join(args.source) if args.source else 'all enabled'}")

@@ -4,10 +4,11 @@ import hashlib, json, sqlite3
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 from ..models import DiscoveredArticle
 from ..models import Source
+from ..scheduling import SourceDueState
 
 MIGRATIONS = [(1, """
 CREATE TABLE sources (id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -38,7 +39,11 @@ def health_failure_classification(note: str | None) -> str:
     return "source_or_parser"
 
 class Database:
-    def __init__(self, path: Path): self.path = path
+    def __init__(self, path: Path, *, clock: Callable[[], datetime] | None = None):
+        self.path = path
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
+    def _iso(self, value: datetime | None = None) -> str:
+        return iso(value or self._clock())
     def connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True); connection = sqlite3.connect(self.path); connection.row_factory = sqlite3.Row; return connection
     def migrate(self) -> None:
@@ -47,26 +52,26 @@ class Database:
             done = {row[0] for row in con.execute("SELECT version FROM schema_migrations")}
             for version, sql in MIGRATIONS:
                 if version not in done:
-                    con.executescript(sql); con.execute("INSERT INTO schema_migrations VALUES (?, ?)", (version, iso()))
+                    con.executescript(sql); con.execute("INSERT INTO schema_migrations VALUES (?, ?)", (version, self._iso()))
     def start_run(self, source_id: str | None) -> int:
         with self.connect() as con:
-            return con.execute("INSERT INTO runs(source_id, started_at) VALUES (?, ?)", (source_id, iso())).lastrowid
+            return con.execute("INSERT INTO runs(source_id, started_at) VALUES (?, ?)", (source_id, self._iso())).lastrowid
     def sync_sources(self, sources: Iterable[Source]) -> None:
         with self.connect() as con:
             for source in sources:
-                con.execute("INSERT INTO sources(id,name,status,updated_at) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,status=excluded.status,updated_at=excluded.updated_at", (source.id, source.name, source.status, iso()))
+                con.execute("INSERT INTO sources(id,name,status,updated_at) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,status=excluded.status,updated_at=excluded.updated_at", (source.id, source.name, source.status, self._iso()))
     def record_fetch(self, run_id: int, source_id: str, url: str, outcome: str, error_message: str | None = None) -> None:
-        with self.connect() as con: con.execute("INSERT INTO fetch_attempts(run_id,source_id,url,fetched_at,outcome,error_message) VALUES (?,?,?,?,?,?)", (run_id, source_id, url, iso(), outcome, error_message))
+        with self.connect() as con: con.execute("INSERT INTO fetch_attempts(run_id,source_id,url,fetched_at,outcome,error_message) VALUES (?,?,?,?,?,?)", (run_id, source_id, url, self._iso(), outcome, error_message))
     def finish_run(self, run_id: int, status: str, summary: object) -> None:
-        with self.connect() as con: con.execute("UPDATE runs SET finished_at=?, status=?, summary_json=? WHERE id=?", (iso(), status, json.dumps(asdict(summary)), run_id))
+        with self.connect() as con: con.execute("UPDATE runs SET finished_at=?, status=?, summary_json=? WHERE id=?", (self._iso(), status, json.dumps(asdict(summary)), run_id))
     def record_error(self, run_id: int, source_id: str, error_type: str, message: str) -> None:
-        with self.connect() as con: con.execute("INSERT INTO run_errors(run_id,source_id,error_type,message,occurred_at) VALUES (?,?,?,?,?)", (run_id,source_id,error_type,message,iso()))
+        with self.connect() as con: con.execute("INSERT INTO run_errors(run_id,source_id,error_type,message,occurred_at) VALUES (?,?,?,?,?)", (run_id,source_id,error_type,message,self._iso()))
     def baseline_has_content(self, source_id: str) -> bool:
         with self.connect() as con:
             return con.execute("SELECT 1 FROM source_run_health WHERE source_id=? AND success=1 AND references_discovered>0 LIMIT 1", (source_id,)).fetchone() is not None
     def record_source_health(self, run_id: int, source_id: str, *, duration_ms: int, success: bool, references: int, accepted: int, rejected: int, new: int, existing: int, extraction_failures: int, timestamped: int, note: str | None = None) -> None:
         with self.connect() as con:
-            con.execute("INSERT INTO source_run_health(run_id,source_id,attempted_at,duration_ms,success,references_discovered,accepted,rejected,new_articles,existing_articles,extraction_failures,timestamped,health_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", (run_id,source_id,iso(),duration_ms,int(success),references,accepted,rejected,new,existing,extraction_failures,timestamped,note))
+            con.execute("INSERT INTO source_run_health(run_id,source_id,attempted_at,duration_ms,success,references_discovered,accepted,rejected,new_articles,existing_articles,extraction_failures,timestamped,health_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", (run_id,source_id,self._iso(),duration_ms,int(success),references,accepted,rejected,new,existing,extraction_failures,timestamped,note))
     def health_summary(self, source_ids: Iterable[str] | None = None, recent_limit: int = 20) -> list[dict[str, object]]:
         requested = list(source_ids or [])
         with self.connect() as con:
@@ -111,6 +116,21 @@ class Database:
                 "recent_notes": [row["health_note"] for row in recent if row["health_note"]],
             })
         return summaries
+    def source_due_state(self, source_id: str, *, history_limit: int = 200) -> SourceDueState:
+        with self.connect() as con:
+            rows = con.execute("SELECT attempted_at, success FROM source_run_health WHERE source_id=? ORDER BY attempted_at DESC LIMIT ?", (source_id, history_limit)).fetchall()
+        if not rows:
+            return SourceDueState(last_attempt_at=None, last_success_at=None, consecutive_failures=0)
+        last_attempt_at = datetime.fromisoformat(rows[0]["attempted_at"])
+        last_success_at = None
+        consecutive_failures = 0
+        for row in rows:
+            if row["success"]:
+                last_success_at = datetime.fromisoformat(row["attempted_at"])
+                break
+            consecutive_failures += 1
+        return SourceDueState(last_attempt_at=last_attempt_at, last_success_at=last_success_at, consecutive_failures=consecutive_failures)
+
     def source_last_successes(self, source_ids: Iterable[str]) -> dict[str, datetime]:
         requested = list(source_ids)
         if not requested:
@@ -143,7 +163,7 @@ class Database:
         new = existing = 0
         with self.connect() as con:
             for article in articles:
-                now = iso(); normalized = " ".join(article.title_original.casefold().split()); content = article.body_original or article.title_original
+                now = self._iso(); normalized = " ".join(article.title_original.casefold().split()); content = article.body_original or article.title_original
                 digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
                 values = (article.source_id, article.source_article_id, article.source_url, article.canonical_url, article.title_original, normalized, article.body_original, article.author, article.category, iso(article.published_at) if article.published_at else None, iso(article.discovered_at), now, now, digest, json.dumps(article.metadata, ensure_ascii=False))
                 try:
