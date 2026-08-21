@@ -8,7 +8,11 @@ An independent, Korean-language technology intelligence collector. It is intenti
 
 ## Current status
 
-SK hynix Korea is the sole **PRODUCTION** source. The Elec, Samsung Newsroom Korea, LG Display, and ETNews hardware sections are **EXPERIMENTAL**. There are no alert integrations.
+SK hynix Korea is the sole source classified **PRODUCTION** for collector policy; this is not evidence of a verified production deployment. The Elec, Samsung Newsroom Korea, LG Display, and ETNews hardware sections are **EXPERIMENTAL**. There are no alert integrations.
+
+The local dashboard is loopback-only and read-only during Phase 0. It has no
+authenticated remote or mutation profile; collection and feedback must use an
+approved CLI workflow.
 
 ## Install and run
 
