@@ -1,8 +1,10 @@
-# No source is production-approved.  These are deliberately experimental.
+# Stage 4 closeout (2026-08-19): The Elec and ETNews Hardware Sections promoted to
+# PRODUCTION on soak evidence. Samsung Newsroom Korea and LG Display remain
+# EXPERIMENTAL. See docs/stage4-editorial-yield.md and docs/promotion-policy.md.
 sources:
   the_elec:
     name: "The Elec (디일렉)"
-    status: EXPERIMENTAL
+    status: PRODUCTION
     enabled: true
     collector: thelec_html
     url: https://www.thelec.kr/
@@ -44,7 +46,7 @@ sources:
     beats: [displays, oled, panels, manufacturing]
   etnews_hardware:
     name: "ETNews Hardware Sections"
-    status: EXPERIMENTAL
+    status: PRODUCTION
     enabled: true
     collector: etnews_html
     url: https://www.etnews.com/news/section.html?id1=10&id2=061
