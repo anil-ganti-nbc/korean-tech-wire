@@ -7,7 +7,7 @@ name = "korean-tech-wire"
 version = "0.1.0"
 description = "Independent Korean-language technology intelligence collector"
 requires-python = ">=3.11"
-dependencies = ["PyYAML>=6.0"]
+dependencies = ["PyYAML>=6.0", "tzdata>=2025.2"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
@@ -21,4 +21,3 @@ pythonpath = ["src"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-

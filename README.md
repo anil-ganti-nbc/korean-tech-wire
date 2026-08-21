@@ -1,10 +1,18 @@
 # Korean Tech Wire
 
+> **Phase 0: UNVERIFIED_PRODUCTION — promotion frozen.** Repository state is
+> not proof of the deployed SHA, scheduler, database, notification authority,
+> backup, or rollback target; those facts remain `UNKNOWN` in the fleet ledger.
+
 An independent, Korean-language technology intelligence collector. It is intentionally a separate package, database, configuration, and runtime from every other Wire project.
 
 ## Current status
 
-SK hynix Korea is the sole **PRODUCTION** source. The Elec, Samsung Newsroom Korea, LG Display, and ETNews hardware sections are **EXPERIMENTAL**. There are no alert integrations.
+SK hynix Korea is the sole source classified **PRODUCTION** for collector policy; this is not evidence of a verified production deployment. The Elec, Samsung Newsroom Korea, LG Display, and ETNews hardware sections are **EXPERIMENTAL**. There are no alert integrations.
+
+The local dashboard is loopback-only and read-only during Phase 0. It has no
+authenticated remote or mutation profile; collection and feedback must use an
+approved CLI workflow.
 
 ## Install and run
 

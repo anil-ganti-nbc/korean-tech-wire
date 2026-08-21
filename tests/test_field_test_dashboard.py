@@ -37,22 +37,49 @@ def _seed(monkeypatch, tmp_path: Path) -> Database:
 
 def _server(monkeypatch, tmp_path):
     database = _seed(monkeypatch, tmp_path)
-    server = serve(port=0)
+    server = serve(port=0, mutation_authorizer=lambda _headers: True)
     thread = Thread(target=server.serve_forever)
     thread.start()
     return database, server, thread
 
 
+def test_phase0_host_validation_rejects_wildcard_lan_and_invalid(monkeypatch, tmp_path):
+    monkeypatch.setenv("KOREAN_TECH_WIRE_DATA_DIR", str(tmp_path / "security"))
+    for host in ("0.0.0.0", "::", "192.168.1.20", "bad host", ""):
+        try:
+            serve(host=host, port=0)
+        except ValueError:
+            continue
+        raise AssertionError(f"unsafe host accepted: {host}")
+
+
+def test_phase0_unauthenticated_mutation_is_denied(monkeypatch, tmp_path):
+    monkeypatch.setenv("KOREAN_TECH_WIRE_DATA_DIR", str(tmp_path / "read-only"))
+    server = serve(port=0)
+    thread = Thread(target=server.serve_forever); thread.start()
+    try:
+        request = Request(
+            f"http://127.0.0.1:{server.server_port}/collect", data=b"source=", method="POST"
+        )
+        try:
+            urlopen(request)
+            raise AssertionError("unauthenticated mutation was accepted")
+        except HTTPError as error:
+            assert error.code == 403
+    finally:
+        server.shutdown(); thread.join(); server.server_close()
+
+
 def test_newsroom_empty_state_and_isolated_path(monkeypatch, tmp_path):
     monkeypatch.setenv("KOREAN_TECH_WIRE_DATA_DIR", str(tmp_path / "field state"))
-    server = serve(port=0)
+    server = serve(port=0, mutation_authorizer=lambda _headers: True)
     thread = Thread(target=server.serve_forever); thread.start()
     try:
         with urlopen(f"http://127.0.0.1:{server.server_port}/") as response:
             page = response.read().decode("utf-8")
         assert "No local leads yet" in page
-        assert "Run Korean Tech Wire collectors" in page
-        assert "COLLECT NOW" in page
+        assert "Phase 0 dashboard is read-only" in page
+        assert "COLLECT NOW" not in page
         assert "Local database only" in page and "No external delivery" in page
         assert "field state" in load_settings(Path("config/config.example.yaml")).database_path.as_posix()
     finally:
@@ -120,7 +147,7 @@ def test_collect_now_uses_core_reports_status_refuses_overlap_and_populates(monk
         return RunSummary(attempted=len(selected), succeeded=len(selected), discovered=len(selected), accepted=len(selected), new=len(selected))
 
     monkeypatch.setattr("korean_tech_wire.dashboard.run_collectors", fake_run)
-    server = serve(port=0); thread = Thread(target=server.serve_forever); thread.start()
+    server = serve(port=0, mutation_authorizer=lambda _headers: True); thread = Thread(target=server.serve_forever); thread.start()
     try:
         base = f"http://127.0.0.1:{server.server_port}"
         first = Request(base + "/collect", data=b"source=", method="POST")
