@@ -1,5 +1,9 @@
 # Korean Tech Wire
 
+> **Phase 0: UNVERIFIED_PRODUCTION — promotion frozen.** Repository state is
+> not proof of the deployed SHA, scheduler, database, notification authority,
+> backup, or rollback target; those facts remain `UNKNOWN` in the fleet ledger.
+
 An independent, Korean-language technology intelligence collector. It is intentionally a separate package, database, configuration, and runtime from every other Wire project.
 
 ## Current status
