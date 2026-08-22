@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable
 
+from ..locking import RunLock
+
 from ..models import DiscoveredArticle
 from ..models import Source
 from ..scheduling import SourceDueState
@@ -199,8 +201,11 @@ class Database:
     def latest_articles(self, limit: int = 20) -> list[sqlite3.Row]:
         with self.connect() as con: return con.execute("SELECT * FROM articles WHERE record_status='valid' ORDER BY COALESCE(published_at, discovered_at) DESC LIMIT ?", (limit,)).fetchall()
     def add_feedback(self, article_id: int, outcome: str, note: str | None = None) -> None:
-        with self.connect() as con:
-            con.execute("INSERT INTO article_feedback(article_id,outcome,note,created_at) VALUES (?,?,?,?)", (article_id, outcome, note, iso()))
+        # M4.5: dashboard feedback writes now take the same RunLock as the
+        # soak collector, closing the Phase-1 concurrent-writer finding.
+        with RunLock(self.path.with_name(self.path.name + '.lock')):
+            with self.connect() as con:
+                con.execute("INSERT INTO article_feedback(article_id,outcome,note,created_at) VALUES (?,?,?,?)", (article_id, outcome, note, iso()))
     def feedback_history(self, article_id: int | None = None) -> list[sqlite3.Row]:
         with self.connect() as con:
             if article_id is None:
