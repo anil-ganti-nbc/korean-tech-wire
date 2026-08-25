@@ -8,7 +8,13 @@ An independent, Korean-language technology intelligence collector. It is intenti
 
 ## Current status
 
-Stage 4 closed 2026-08-19. **PRODUCTION**: SK hynix Korea, The Elec, ETNews Hardware Sections. **EXPERIMENTAL**: Samsung Newsroom Korea, LG Display. There are no alert integrations.
+Stage 4 closed 2026-08-19. **PRODUCTION**: SK hynix Korea, The Elec, ETNews Hardware Sections. **EXPERIMENTAL**: Samsung Newsroom Korea, LG Display, ZDNet Korea (semiconductor/display vertical), Digital Today (semiconductor/display vertical). There are no alert integrations.
+
+ZDNet Korea and Digital Today were added 2026-08-25 as EXPERIMENTAL verticals
+(official robots.txt-declared feeds only; see `docs/source-research.md`
+addendum). Their notification authority is irrelevant today — KTW has no
+delivery path by policy — but their promotion to PRODUCTION requires the
+standard per-source soak evidence.
 
 SK hynix Korea's RSS endpoint returns `403 Forbidden` from every Hetzner-origin request since 2026-08-10 — diagnosed as an infrastructure-level (HOST-BLOCKED) block, not a code defect; see `docs/stage4.1-reliability-repair.md`. It remains the production control by lifecycle but is not currently collecting, and now backs off automatically instead of retrying at full frequency (`korean-tech-wire health` shows each source's live `schedule=` state).
 
