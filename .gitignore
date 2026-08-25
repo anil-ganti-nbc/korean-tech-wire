@@ -10,3 +10,5 @@ var/*.backup
 var/raw/
 config/config.local.yaml
 .env
+
+*.egg-info/
