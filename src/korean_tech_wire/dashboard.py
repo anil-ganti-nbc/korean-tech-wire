@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
@@ -88,6 +89,56 @@ def badge(value: str) -> str:
     return f'<span class="badge {e(value.lower().replace("_", "-"))}">{e(value.replace("_", " "))}</span>'
 
 
+# Fleet Law 3 (health honesty): HTTP success without useful output is not
+# healthy after policy cycles, and a badge must not stay HEALTHY forever
+# off an ancient success. STALE_AFTER bounds how old the last success may
+# be while still counting as HEALTHY; it deliberately exceeds the backoff
+# ceiling (24h) so a HOST-BLOCKED lane in deep backoff shows as BLOCKED,
+# not as a flapping failure.
+STALE_AFTER = timedelta(hours=48)
+_BLOCKED_TOKENS = ("403", "forbidden", "blocked", "cloudflare", "rate limit")
+
+
+def health_state(item: dict[str, object], now: datetime | None = None) -> str:
+    """Recency-aware, block-aware source health state.
+
+    HEALTHY  — a success exists and is recent enough.
+    STALE    — a success exists but is older than STALE_AFTER (green-process
+               / dead-source drift becomes visible instead of hiding).
+    BLOCKED  — failure notes indicate host/edge blocking and the success is
+               missing or stale; surfaced distinctly from generic failure
+               (SK hynix AWS-ELB specimen).
+    FAILED   — failures exist and no success ever recorded.
+    UNKNOWN  — nothing recorded either way.
+    """
+    now = now or datetime.now(timezone.utc)
+
+    def _parse(value: object) -> datetime | None:
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+
+    last_success = _parse(item.get("last_success"))
+    last_failure = _parse(item.get("last_failure"))
+    notes = " ".join(item.get("recent_notes") or []).lower()
+    blocked_signal = any(token in notes for token in _BLOCKED_TOKENS)
+    fresh_success = last_success is not None and (now - last_success) <= STALE_AFTER
+
+    if blocked_signal and not fresh_success:
+        return "BLOCKED"
+    if fresh_success:
+        return "HEALTHY"
+    if last_success is not None:
+        return "STALE"
+    if last_failure is not None:
+        return "FAILED" if not blocked_signal else "BLOCKED"
+    return "UNKNOWN"
+
+
 def table(headers: tuple[str, ...], rows: list[tuple[str, ...]], empty_title: str, empty_detail: str) -> str:
     if not rows:
         return f'<div class=empty><b>{e(empty_title)}</b><span>{e(empty_detail)}</span></div>'
@@ -134,7 +185,7 @@ def _article_rows(database: Database, sources: dict[str, object], channel: str =
 
 def _style() -> str:
     return """<style>
-:root{--bg:#08111d;--nav:#0c1727;--card:#111f31;--line:#26374d;--text:#e9eef7;--muted:#9baac0;--blue:#74b7ff;--green:#65df91;--amber:#f2bd4f;--red:#ff7770}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Segoe UI",sans-serif}a{color:#80bfff;text-decoration:none}.app{min-height:100vh;display:grid;grid-template-columns:210px 1fr;grid-template-rows:68px 1fr}header{grid-column:1/3;display:flex;align-items:center;gap:14px;padding:0 20px;background:#0b1524;border-bottom:1px solid var(--line)}.brand{font-size:17px;font-weight:760}.brand small,.muted,small{display:block;color:var(--muted);font-size:11px;font-weight:400}.pill,.badge{display:inline-block;border-radius:5px;font-size:10px;font-weight:800;letter-spacing:.04em;padding:4px 7px}.pill{color:#d5c2ff;background:#25235c;border:1px solid #4842a2}.provenance{color:var(--muted);max-width:460px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.spacer{flex:1}button{border:1px solid #3d4c66;background:#1a2b42;color:#eaf2ff;border-radius:5px;padding:7px 10px;font-weight:700;cursor:pointer}aside{background:var(--nav);border-right:1px solid var(--line);padding:12px}.navtitle{font-size:10px;color:var(--muted);letter-spacing:.08em;margin:15px 8px 5px}.nav{display:block;color:#d6dfed;padding:8px 10px;border-radius:5px;margin:2px 0}.nav.active{background:#302d80;color:#fff;font-weight:700}main{width:100%;max-width:1650px;margin:auto;padding:16px 20px}.summary{display:grid;grid-template-columns:1.35fr repeat(5,1fr);gap:10px}.metric,.card{background:var(--card);border:1px solid var(--line);border-radius:8px}.metric{min-height:87px;padding:12px}.label{font-size:10px;color:var(--muted);font-weight:800;letter-spacing:.06em}.number{font-size:25px;font-weight:780;margin:3px 0}.overall{border-color:#315173}.overall .number{color:var(--blue)}.grid{display:grid;grid-template-columns:minmax(0,3fr) minmax(260px,1fr);gap:13px;margin-top:13px}.card{padding:13px}h2{font-size:15px;margin:0 0 10px}.sub{color:var(--muted);font-size:12px;margin:-5px 0 10px}.lead{padding:11px 0;border-bottom:1px solid #22324a}.lead:last-child{border:0}.headline{display:block;color:#f3f7fe;font-size:15px;font-weight:710;line-height:1.35;margin:4px 0 5px}.lead-meta{display:flex;gap:7px;align-items:center;flex-wrap:wrap;color:var(--muted);font-size:11px}.snippet{color:#bbc8da;font-size:12px;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.badge.production{background:#133f2c;color:var(--green)}.badge.experimental{background:#433514;color:var(--amber)}.badge.healthy,.badge.useful{background:#133f2c;color:var(--green)}.badge.failed,.badge.not-useful,.badge.off-topic{background:#4b252b;color:#ff9a93}.badge.needs-review,.badge.duplicate{background:#453713;color:var(--amber)}.badge.unknown{background:#29364a;color:#cbd6e6}.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.filters select{color:var(--text);background:#0d1a2b;border:1px solid #34465e;border-radius:5px;padding:7px}.source-health{margin-top:13px}.two{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-top:13px}table{width:100%;border-collapse:collapse;font-size:12px}th{text-align:left;color:var(--muted);font-size:10px;letter-spacing:.05em;padding:7px;border-bottom:1px solid var(--line)}td{padding:8px 7px;border-bottom:1px solid #213047;vertical-align:top}.empty{min-height:110px;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center;color:var(--muted)}.empty b{color:#e2eaf5}.detail-title{font-size:22px;line-height:1.36;margin:4px 0 10px}.evidence{white-space:pre-wrap;color:#cad5e5;line-height:1.55;background:#0d1a2b;border:1px solid #26374d;border-radius:6px;padding:12px}.feedback{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}.feedback button{font-size:11px}.footer{color:var(--muted);font-size:11px;text-align:center;margin:16px}@media(max-width:1000px){.app{grid-template-columns:1fr;grid-template-rows:68px auto 1fr}header{grid-column:1}.provenance{max-width:170px}aside{display:flex;overflow:auto;border-right:0;border-bottom:1px solid var(--line);padding:7px}.navtitle{display:none}.nav{white-space:nowrap}.summary,.grid,.two{grid-template-columns:1fr}}</style>"""
+:root{--bg:#08111d;--nav:#0c1727;--card:#111f31;--line:#26374d;--text:#e9eef7;--muted:#9baac0;--blue:#74b7ff;--green:#65df91;--amber:#f2bd4f;--red:#ff7770}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Segoe UI",sans-serif}a{color:#80bfff;text-decoration:none}.app{min-height:100vh;display:grid;grid-template-columns:210px 1fr;grid-template-rows:68px 1fr}header{grid-column:1/3;display:flex;align-items:center;gap:14px;padding:0 20px;background:#0b1524;border-bottom:1px solid var(--line)}.brand{font-size:17px;font-weight:760}.brand small,.muted,small{display:block;color:var(--muted);font-size:11px;font-weight:400}.pill,.badge{display:inline-block;border-radius:5px;font-size:10px;font-weight:800;letter-spacing:.04em;padding:4px 7px}.pill{color:#d5c2ff;background:#25235c;border:1px solid #4842a2}.provenance{color:var(--muted);max-width:460px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.spacer{flex:1}button{border:1px solid #3d4c66;background:#1a2b42;color:#eaf2ff;border-radius:5px;padding:7px 10px;font-weight:700;cursor:pointer}aside{background:var(--nav);border-right:1px solid var(--line);padding:12px}.navtitle{font-size:10px;color:var(--muted);letter-spacing:.08em;margin:15px 8px 5px}.nav{display:block;color:#d6dfed;padding:8px 10px;border-radius:5px;margin:2px 0}.nav.active{background:#302d80;color:#fff;font-weight:700}main{width:100%;max-width:1650px;margin:auto;padding:16px 20px}.summary{display:grid;grid-template-columns:1.35fr repeat(5,1fr);gap:10px}.metric,.card{background:var(--card);border:1px solid var(--line);border-radius:8px}.metric{min-height:87px;padding:12px}.label{font-size:10px;color:var(--muted);font-weight:800;letter-spacing:.06em}.number{font-size:25px;font-weight:780;margin:3px 0}.overall{border-color:#315173}.overall .number{color:var(--blue)}.grid{display:grid;grid-template-columns:minmax(0,3fr) minmax(260px,1fr);gap:13px;margin-top:13px}.card{padding:13px}h2{font-size:15px;margin:0 0 10px}.sub{color:var(--muted);font-size:12px;margin:-5px 0 10px}.lead{padding:11px 0;border-bottom:1px solid #22324a}.lead:last-child{border:0}.headline{display:block;color:#f3f7fe;font-size:15px;font-weight:710;line-height:1.35;margin:4px 0 5px}.lead-meta{display:flex;gap:7px;align-items:center;flex-wrap:wrap;color:var(--muted);font-size:11px}.snippet{color:#bbc8da;font-size:12px;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.badge.production{background:#133f2c;color:var(--green)}.badge.experimental{background:#433514;color:var(--amber)}.badge.healthy,.badge.useful{background:#133f2c;color:var(--green)}.badge.failed,.badge.not-useful,.badge.off-topic{background:#4b252b;color:#ff9a93}.badge.needs-review,.badge.duplicate{background:#453713;color:var(--amber)}.badge.unknown{background:#29364a;color:#cbd6e6}.badge.stale{background:#453713;color:var(--amber)}.badge.blocked{background:#4b252b;color:#ff9a93}.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.filters select{color:var(--text);background:#0d1a2b;border:1px solid #34465e;border-radius:5px;padding:7px}.source-health{margin-top:13px}.two{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-top:13px}table{width:100%;border-collapse:collapse;font-size:12px}th{text-align:left;color:var(--muted);font-size:10px;letter-spacing:.05em;padding:7px;border-bottom:1px solid var(--line)}td{padding:8px 7px;border-bottom:1px solid #213047;vertical-align:top}.empty{min-height:110px;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center;color:var(--muted)}.empty b{color:#e2eaf5}.detail-title{font-size:22px;line-height:1.36;margin:4px 0 10px}.evidence{white-space:pre-wrap;color:#cad5e5;line-height:1.55;background:#0d1a2b;border:1px solid #26374d;border-radius:6px;padding:12px}.feedback{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}.feedback button{font-size:11px}.footer{color:var(--muted);font-size:11px;text-align:center;margin:16px}@media(max-width:1000px){.app{grid-template-columns:1fr;grid-template-rows:68px auto 1fr}header{grid-column:1}.provenance{max-width:170px}aside{display:flex;overflow:auto;border-right:0;border-bottom:1px solid var(--line);padding:7px}.navtitle{display:none}.nav{white-space:nowrap}.summary,.grid,.two{grid-template-columns:1fr}}</style>"""
 
 
 def _collection_panel(state: dict[str, object], sources: dict[str, object], empty: bool = False) -> str:
@@ -157,7 +208,7 @@ def render_overview(database: Database, sources: dict[str, object], query: dict[
         lead_rows.append(f'''<article class=lead><div class=lead-meta>{badge(article["channel"])} <b>{e(article["source_name"])}</b> <span>{e(article["published_at"] or article["discovered_at"])}</span> {badge(article["feedback"]) if article["feedback"] else ""}</div><a class=headline href="/articles/{article["id"]}">{e(article["title_original"])}</a><div class=lead-meta>{e(article["category"] or "Uncategorised")} · {external(article["canonical_url"])}</div>{f"<div class=snippet>{e(excerpt)}</div>" if excerpt else ""}</article>''')
     health_rows, review_rows = [], []
     for source_id, source in sources.items():
-        item = health_map.get(source_id, {}); status = "HEALTHY" if item.get("last_success") else ("FAILED" if item.get("last_failure") else "UNKNOWN")
+        item = health_map.get(source_id, {}); status = health_state(item)
         link = f'/?source={quote(source_id)}'
         health_rows.append((f'<a class=clickable href="{link}#health">{e(source.name)}<small>{e(source_id)}</small></a>', badge(source.status), badge(status), e(item.get("last_success") or "—"), e(item.get("latest_accepted") if item.get("latest_accepted") is not None else "—"), e("; ".join(item.get("recent_notes", [])[:1]) or "—")))
         sf = [row for row in feedback if row["source_id"] == source_id]

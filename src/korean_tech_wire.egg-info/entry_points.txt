@@ -1,0 +1,2 @@
+[console_scripts]
+korean-tech-wire = korean_tech_wire.cli:main

@@ -166,8 +166,12 @@ def test_collect_now_uses_core_reports_status_refuses_overlap_and_populates(monk
                 break
             time.sleep(0.03)
         assert state["status"] == "COMPLETED"
-        assert state["summary"]["new"] == 5
-        assert set(state["sources"]) == {"the_elec", "sk_hynix_newsroom", "samsung_newsroom_kr", "lg_display_newsroom", "etnews_hardware"}
+        # Registry size is expected to grow as sources are added; derive the
+        # count from the live registry instead of hardcoding it.
+        from korean_tech_wire import dashboard as _dashboard
+        expected_sources = set(_dashboard._source_map().keys())
+        assert state["summary"]["new"] == len(expected_sources)
+        assert set(state["sources"]) == expected_sources
         with urlopen(base + "/") as response:
             page = response.read().decode("utf-8")
         assert "Local lead SK hynix Newsroom Korea" in page

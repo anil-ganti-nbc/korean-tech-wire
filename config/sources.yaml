@@ -1,7 +1,28 @@
 # Stage 4 closeout (2026-08-19): The Elec and ETNews Hardware Sections promoted to
 # PRODUCTION on soak evidence. Samsung Newsroom Korea and LG Display remain
 # EXPERIMENTAL. See docs/stage4-editorial-yield.md and docs/promotion-policy.md.
+# 2026-08-25: ZDNet Korea (official feed, robots-declared) and Digital Today
+# (Google News sitemap) added as EXPERIMENTAL; see docs/source-research.md addendum.
 sources:
+  zdnet_korea_semi_display:
+    name: "ZDNet Korea (semiconductor/display vertical)"
+    status: EXPERIMENTAL
+    enabled: true
+    collector: zdnet_feed
+    url: https://zdnet.co.kr/feed/article_list.xml
+    timezone: Asia/Seoul
+    beats: [semiconductors, displays]
+    options:
+      extra_feed_urls:
+        - https://zdnet.co.kr/feed/article_list2.xml
+  digitaltoday_semi_display:
+    name: "Digital Today (semiconductor/display vertical)"
+    status: EXPERIMENTAL
+    enabled: true
+    collector: gnews_sitemap
+    url: https://www.digitaltoday.co.kr/sitemap.xml
+    timezone: Asia/Seoul
+    beats: [semiconductors, displays, components]
   the_elec:
     name: "The Elec (디일렉)"
     status: PRODUCTION

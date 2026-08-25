@@ -19,6 +19,18 @@ ETNEWS_LOW_VALUE_TERMS = (
     "연회비", "시장,", "ai 행정", "ipo", "mou", "디스플레이 스쿨", "신용등급", "증권신고서", "인허가",
 )
 
+# ZDNet Korea and Digital Today are general-IT outlets: the campaign admits
+# them ONLY as narrow semiconductor/display verticals, so the filter is a
+# signal-term ALLOWLIST (same mechanism as The Elec) rather than a low-value
+# denylist. A title with no semiconductor/display signal is rejected.
+SEMI_DISPLAY_SIGNAL_TERMS = THELEC_SIGNAL_TERMS + (
+    "tsmc", "t-smash", "삼성전자", "sk하이닉스", "sk하이닉", "lg디스플레이", "엘지디스플레이",
+    "마이크론", "인텔", "엔비디아", "amd", "퀄컴", "미쓰비시전기", "루멘스",
+    "팹리스", "설비", "소부장", "에칭", "노광", "이온임플란트", "cvd", "pvd",
+    "euv", "dram", "hbm4", "hbm3e", "mcp", "cis", "ddr", "gddr", "lpddr",
+    "8세대", "11세대", "it디스플레이", "마이크로led", "qled", "산화물", "폴리머",
+)
+
 @dataclass(frozen=True, slots=True)
 class FilterDecision:
     accepted: bool
@@ -38,4 +50,8 @@ def classify(source: Source, article: DiscoveredArticle) -> FilterDecision:
         title = article.title_original.casefold()
         if any(term in title for term in ETNEWS_LOW_VALUE_TERMS):
             return FilterDecision(False, "low_value_section_item")
+    if source.id in ("zdnet_korea_semi_display", "digitaltoday_semi_display"):
+        title = article.title_original.casefold()
+        if not any(term in title for term in SEMI_DISPLAY_SIGNAL_TERMS):
+            return FilterDecision(False, "no_semiconductor_or_display_signal")
     return FilterDecision(True, "accepted")

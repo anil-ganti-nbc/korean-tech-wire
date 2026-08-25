@@ -134,3 +134,56 @@ The Elec source taxonomy observed in the public navigation includes `반도체` 
 - The Elec Korean index: <https://www.thelec.kr/>.
 - ETNews: <https://www.etnews.com/>.
 - OpenDART introduction and developer guide: <https://engopendart.fss.or.kr/intro/main.do> and <https://engopendart.fss.or.kr/guide/detail.do?apiGrpCd=DE001&apiId=AE00001>.
+
+---
+
+## Addendum (2026-08-25): campaign P0/P1 pass — KIPOST, ZDNet Korea, Digital Today, KBench, Bloter
+
+Live reconnaissance per candidate before any implementation decision:
+
+### KIPOST — REJECT (source defunct)
+- kipost.com serves a hugeDomains.com parking page (domain for sale).
+- kipost.co.kr serves a cafe24 "site does not exist" placeholder script.
+- kipost.kr and kipostnews.com are unreachable.
+- No live publication remains to extract from. Re-evaluate only if the
+  outlet returns under a new canonical domain.
+
+### ZDNet Korea (semiconductor/display vertical) — ADD (EXPERIMENTAL)
+- robots.txt officially declares feeds:
+  Sitemap: https://zdnet.co.kr/feed/article_list.xml (+ _2).
+- Feed entries carry article URLs (/view/?no=YYYYMMDDHHMMSS, the
+  publisher's own KST publish instant) and lastmod; article pages
+  server-render og:title. Verified live 2026-08-25.
+- Extraction: feed -> newest-first by no=-derived timestamp (cap 20/run)
+  -> per-article og:title. Vertical enforced downstream by signal-term
+  allowlist (editorial/filtering.py SEMI_DISPLAY_SIGNAL_TERMS).
+- Registered as zdnet_korea_semi_display, status EXPERIMENTAL.
+
+### Digital Today (semiconductor/display vertical) — ADD (EXPERIMENTAL)
+- robots.txt declares sitemap.xml, a Google News sitemap carrying
+  news:title + news:publication_date + news:keywords per URL — title,
+  timestamp and canonical URL in ONE request; lowest maintenance surface
+  found in this pass.
+- robots.txt disallows /news/articleList.html for User-agent: *; this
+  collector reads ONLY the declared sitemap and never touches listing
+  pages.
+- Registered as digitaltoday_semi_display, status EXPERIMENTAL.
+
+### KBench (P1) — DEFER (marginal value)
+- ?rss endpoint returns HTML, not XML; no declared structured feed found.
+- Marginal-value rule: ZDNet Korea + Digital Today already capture most of
+  KBench's semiconductor/display overlap via existing The Elec/ETNews
+  coverage. Revisit only if soak shows a distinct KBench-only story class.
+
+### Bloter (P1) — DEFER (access + marginal value)
+- bloter.net/rss unreachable from the recon environment (connection
+  failure); semiconductor coverage overlaps heavily with ZDNet Korea's.
+- Per campaign rules: no anti-bot engineering; secondary references can
+  recover blocked-source stories later.
+
+### Duplicate/overlap observation plan
+During the next soak, per-source yield logs should record overlap between
+zdnet_korea_semi_display, digitaltoday_semi_display, the_elec and
+etnews_hardware on the same story (same company+event within 24h). If
+either new source adds <10% unique stories over a full soak window, it is
+a REJECT/retire candidate at its first promotion review.

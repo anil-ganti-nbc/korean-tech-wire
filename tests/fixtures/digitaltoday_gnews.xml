@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Trimmed from live https://www.digitaltoday.co.kr/sitemap.xml on 2026-08-25
+     (robots.txt-declared Google News sitemap). Structure and namespaces
+     verbatim; entries reduced; titles are representative Korean headlines
+     transcribed from the live feed. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">
+	<url>
+		<loc>https://www.digitaltoday.co.kr/news/articleView.html?idxno=695241</loc>
+		<news:news>
+		  <news:publication>
+			<news:name>디지털투데이 (DigitalToday)</news:name>
+			<news:language>ko</news:language>
+		  </news:publication>
+		  <news:genres>PressRelease</news:genres>
+		  <news:publication_date>2026-08-25T11:00:00+09:00</news:publication_date>
+		  <news:title>SK하이닉스 HBM4 양산 체제 가동, 메모리 반도체 경쟁 격화</news:title>
+		  <news:keywords>디지털투데이, SK하이닉스, hbm4</news:keywords>
+		</news:news>
+	</url>
+	<url>
+		<loc>https://www.digitaltoday.co.kr/news/articleView.html?idxno=695205</loc>
+		<news:news>
+		  <news:publication>
+			<news:name>디지털투데이 (DigitalToday)</news:name>
+			<news:language>ko</news:language>
+		  </news:publication>
+		  <news:genres>PressRelease</news:genres>
+		  <news:publication_date>2026-08-25T09:30:00+09:00</news:publication_date>
+		  <news:title>삼성전자, OLED 디스플레이 신규 라인 투자 발표</news:title>
+		  <news:keywords>삼성전자, oled</news:keywords>
+		</news:news>
+	</url>
+	<url>
+		<loc>https://www.digitaltoday.co.kr/news/articleView.html?idxno=695199</loc>
+		<news:news>
+		  <news:publication>
+			<news:name>디지털투데이 (DigitalToday)</news:name>
+			<news:language>ko</news:language>
+		  </news:publication>
+		  <news:genres>PressRelease</news:genres>
+		  <news:publication_date>2026-08-25T08:15:00+09:00</news:publication_date>
+		</news:news>
+	</url>
+</urlset>

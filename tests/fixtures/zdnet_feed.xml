@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Trimmed from live https://zdnet.co.kr/feed/article_list.xml on 2026-08-25
+     (robots.txt-declared feed). URLs/lastmods verbatim; entry count reduced. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<url>
+		<loc>https://zdnet.co.kr/view/?no=20260825102143</loc>
+		<lastmod>2026-08-25T11:01:15Z</lastmod>
+	</url>
+	<url>
+		<loc>https://zdnet.co.kr/view/?no=20260824180957</loc>
+		<lastmod>2026-08-25T11:02:07Z</lastmod>
+	</url>
+	<url>
+		<loc>https://www.zdnet.co.kr/news/board_list.xml</loc>
+		<lastmod>2026-08-25T10:00:00Z</lastmod>
+	</url>
+</urlset>
