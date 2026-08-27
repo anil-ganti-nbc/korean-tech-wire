@@ -20,16 +20,55 @@ import json
 import os
 import secrets
 import signal
+import sys
 import threading
 import time
 import webbrowser
 from pathlib import Path
 
-# Repo root is two levels up from native/windows/launcher.py. The desktop
-# .cmd already does `cd /d %REPO%` before invoking this script, but we pin
-# paths from our own file location too so this keeps working if it is ever
-# launched with a different working directory.
-REPO_ROOT = Path(__file__).resolve().parents[2]
+
+def _default_repo_root() -> Path:
+    """Repo root is normally two levels up from native/windows/launcher.py,
+    and the desktop .cmd already does `cd /d %REPO%` before invoking this
+    script -- but that `__file__`-based trick breaks once this script is
+    frozen by PyInstaller: inside a onefile build, `__file__` resolves
+    relative to the bootloader's temp extraction dir (sys._MEIPASS-adjacent),
+    not the real checkout, so `parents[2]` lands on nonsense like
+    `%LOCALAPPDATA%\\config\\config.local.yaml` instead of the repo's config.
+
+    When frozen, resolve from `sys.executable` (the real .exe path) instead,
+    and walk upward looking for this repo's tracked config/sources.yaml --
+    that handles the exe being kept inside the repo (e.g. dist/Korean Tech
+    Wire.exe). If no ancestor has it -- e.g. the exe was copied out to
+    _Launchers, a sibling of the repo rather than a descendant -- fall back
+    to this fleet's standard checkout location, matching the hardcoded
+    `set "REPO=C:\\Users\\anil\\Clanks\\korean-tech-wire"` every sibling .cmd
+    launcher already relies on.
+    """
+    if getattr(sys, "frozen", False):
+        candidate = Path(sys.executable).resolve().parent
+        for _ in range(4):
+            if (candidate / "config" / "sources.yaml").exists():
+                return candidate
+            parent = candidate.parent
+            if parent == candidate:
+                break
+            candidate = parent
+        return Path(r"C:\Users\anil\Clanks\korean-tech-wire")
+    return Path(__file__).resolve().parents[2]
+
+
+REPO_ROOT = _default_repo_root()
+
+# config.local.yaml's database_path is a plain relative path
+# ("var/korean_tech_wire.db"), resolved against the process's cwd -- fine
+# for the .cmd, which already does `cd /d %REPO%` before invoking this
+# script, but a double-clicked standalone .exe (e.g. copied straight into
+# _Launchers) inherits whatever cwd Explorer starts it with instead, and
+# would silently create/read a stray var/ next to the exe rather than the
+# repo's real database. Anchor cwd to REPO_ROOT unconditionally so this
+# resolves the same way no matter how the process was started.
+os.chdir(REPO_ROOT)
 
 # Point the dashboard at the same local config the launcher's health check
 # already validated, instead of letting it silently fall back to the
