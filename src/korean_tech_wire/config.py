@@ -15,6 +15,14 @@ class Settings:
     database_path: Path
     request_timeout_seconds: int
     user_agent: str
+    # Off by default: EXPERIMENTAL sources (soak/newly-added collectors such
+    # as ZDNet Korea / Digital Today) stay wired into the collector registry
+    # and reachable via an explicit per-collector run, but their trigger
+    # controls are hidden from the normal dashboard UI and "Run all
+    # collectors" never includes them silently. Set
+    # `show_experimental_sources: true` in config.local.yaml, or export
+    # KOREAN_TECH_WIRE_SHOW_EXPERIMENTAL=1, to reveal them again.
+    show_experimental_sources: bool = False
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -36,10 +44,14 @@ def load_settings(config_path: Path) -> Settings:
         root = Path(data_dir).expanduser().resolve()
         root.mkdir(parents=True, exist_ok=True)
         configured_database = root / "korean_tech_wire.db"
+    show_experimental = bool(data.get("show_experimental_sources", False))
+    if os.environ.get("KOREAN_TECH_WIRE_SHOW_EXPERIMENTAL") == "1":
+        show_experimental = True
     return Settings(
         database_path=configured_database,
         request_timeout_seconds=int(data.get("request_timeout_seconds", 20)),
         user_agent=str(data.get("user_agent", "KoreanTechWire/0.1")),
+        show_experimental_sources=show_experimental,
     )
 
 

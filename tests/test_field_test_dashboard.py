@@ -133,6 +133,148 @@ def test_native_packaging_keeps_dashboard_visible_and_uses_windowed_bundle():
     assert '"DISCORD", "WEBHOOK", "DELIVERY", "OUTBOX"' in launcher
 
 
+def test_qc_decision_archives_removes_from_queue_and_blocks_double_qc(monkeypatch, tmp_path):
+    database, server, thread = _server(monkeypatch, tmp_path)
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        with database.connect() as con:
+            row = con.execute("SELECT id, title_original FROM articles WHERE source_id='sk_hynix_newsroom'").fetchone()
+        with urlopen(base + "/") as response:
+            before = response.read().decode("utf-8")
+        assert row["title_original"] in before
+
+        payload = urlencode({"article_id": row["id"], "decision": "USEFUL"}).encode()
+        request = Request(base + "/qc", data=payload, method="POST")
+        with urlopen(request) as response:
+            assert response.status == 200
+
+        # Removed from the active queue immediately -- it may still surface
+        # once, read-only, in the "Recently QCed" ledger section, but no
+        # longer as a clickable active headline.
+        with urlopen(base + "/") as response:
+            after = response.read().decode("utf-8")
+        assert f'<a class=headline href="/articles/{row["id"]}">' not in after
+        assert "Recently QCed" in after
+        assert after.count(row["title_original"]) == 1
+
+        # The article row itself is untouched (no destructive mutation of the
+        # live DB); the decision lives only in the separate QC archive.
+        with database.connect() as con:
+            assert con.execute("SELECT title_original FROM articles WHERE id=?", (row["id"],)).fetchone()[0] == row["title_original"]
+
+        # A second QC decision on the same article is refused, not duplicated.
+        again = Request(base + "/qc", data=urlencode({"article_id": row["id"], "decision": "NOT_USEFUL"}).encode(), method="POST")
+        try:
+            urlopen(again)
+            raise AssertionError("double QC decision was accepted")
+        except HTTPError as error:
+            assert error.code == 409
+
+        with urlopen(base + f"/articles/{row['id']}") as response:
+            detail = response.read().decode("utf-8")
+        assert "QC decision recorded" in detail
+        assert "USEFUL" in detail
+    finally:
+        server.shutdown(); thread.join(); server.server_close()
+
+
+def test_qc_decision_requires_authenticated_mutation_profile(monkeypatch, tmp_path):
+    monkeypatch.setenv("KOREAN_TECH_WIRE_DATA_DIR", str(tmp_path / "qc-read-only"))
+    server = serve(port=0)
+    thread = Thread(target=server.serve_forever); thread.start()
+    try:
+        request = Request(f"http://127.0.0.1:{server.server_port}/qc", data=urlencode({"article_id": 1, "decision": "USEFUL"}).encode(), method="POST")
+        try:
+            urlopen(request)
+            raise AssertionError("unauthenticated QC decision was accepted")
+        except HTTPError as error:
+            assert error.code == 403
+    finally:
+        server.shutdown(); thread.join(); server.server_close()
+
+
+def test_qc_archive_survives_restart(monkeypatch, tmp_path):
+    monkeypatch.setenv("KOREAN_TECH_WIRE_DATA_DIR", str(tmp_path / "qc-restart"))
+    database = _seed(monkeypatch, tmp_path)
+    server = serve(port=0, mutation_authorizer=lambda _headers: True)
+    thread = Thread(target=server.serve_forever); thread.start()
+    try:
+        with database.connect() as con:
+            article_id = con.execute("SELECT id FROM articles WHERE source_id='sk_hynix_newsroom'").fetchone()[0]
+        payload = urlencode({"article_id": article_id, "decision": "DUPLICATE"}).encode()
+        urlopen(Request(f"http://127.0.0.1:{server.server_port}/qc", data=payload, method="POST"))
+    finally:
+        server.shutdown(); thread.join(); server.server_close()
+
+    # Fresh server process/object over the same on-disk data directory: the
+    # QC decision must still be there (on disk, not in memory) and the item
+    # must still be excluded from the active queue.
+    server2 = serve(port=0, mutation_authorizer=lambda _headers: True)
+    thread2 = Thread(target=server2.serve_forever); thread2.start()
+    try:
+        with urlopen(f"http://127.0.0.1:{server2.server_port}/") as response:
+            page = response.read().decode("utf-8")
+        assert "Recently QCed" in page
+        with urlopen(f"http://127.0.0.1:{server2.server_port}/articles/{article_id}") as response:
+            detail = response.read().decode("utf-8")
+        assert "QC decision recorded" in detail
+        assert "DUPLICATE" in detail
+    finally:
+        server2.shutdown(); thread2.join(); server2.server_close()
+
+
+def test_run_all_collectors_never_includes_experimental_sources(monkeypatch, tmp_path):
+    monkeypatch.setenv("KOREAN_TECH_WIRE_DATA_DIR", str(tmp_path / "production-only"))
+    calls = []
+
+    def fake_run(sources, settings, database, source_id=None, production_only=False, progress=None):
+        calls.append({"source_id": source_id, "production_only": production_only})
+        from korean_tech_wire.discovery.runner import RunSummary
+        return RunSummary(attempted=0, succeeded=0, discovered=0, accepted=0, new=0)
+
+    monkeypatch.setattr("korean_tech_wire.dashboard.run_collectors", fake_run)
+    server = serve(port=0, mutation_authorizer=lambda _headers: True)
+    thread = Thread(target=server.serve_forever); thread.start()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        # Run all collectors (no explicit source): must be production_only.
+        urlopen(Request(base + "/collect", data=b"source=", method="POST"))
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not calls:
+            time.sleep(0.02)
+        assert calls[-1] == {"source_id": None, "production_only": True}
+        while True:
+            with urlopen(base + "/collection-status") as response:
+                if not json.load(response)["running"]:
+                    break
+            time.sleep(0.02)
+
+        # Explicitly targeting one collector (including an EXPERIMENTAL one)
+        # is the only way an EXPERIMENTAL source gets to run, and it must not
+        # be filtered out by production_only.
+        urlopen(Request(base + "/collect", data=b"source=zdnet_korea_semi_display", method="POST"))
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and len(calls) < 2:
+            time.sleep(0.02)
+        assert calls[-1] == {"source_id": "zdnet_korea_semi_display", "production_only": False}
+    finally:
+        server.shutdown(); thread.join(); server.server_close()
+
+
+def test_experimental_sources_hidden_from_run_controls_unless_configured(monkeypatch, tmp_path):
+    monkeypatch.setenv("KOREAN_TECH_WIRE_DATA_DIR", str(tmp_path / "exp-hidden"))
+    server = serve(port=0, mutation_authorizer=lambda _headers: True)
+    thread = Thread(target=server.serve_forever); thread.start()
+    try:
+        with urlopen(f"http://127.0.0.1:{server.server_port}/") as response:
+            page = response.read().decode("utf-8")
+        assert "hidden (enable in config)" in page
+        assert 'data-source="zdnet_korea_semi_display"' not in page
+        assert 'data-source="sk_hynix_newsroom"' in page
+    finally:
+        server.shutdown(); thread.join(); server.server_close()
+
+
 def test_collect_now_uses_core_reports_status_refuses_overlap_and_populates(monkeypatch, tmp_path):
     monkeypatch.setenv("KOREAN_TECH_WIRE_DATA_DIR", str(tmp_path / "interactive"))
 

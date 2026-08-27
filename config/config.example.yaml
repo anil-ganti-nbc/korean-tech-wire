@@ -1,3 +1,11 @@
 database_path: var/korean_tech_wire.db
 request_timeout_seconds: 20
 user_agent: "KoreanTechWire/0.1 (experimental research collector; contact: configure-before-production)"
+# Off by default. EXPERIMENTAL sources (e.g. ZDNet Korea, Digital Today)
+# stay wired into the collector registry either way, but their per-collector
+# "Run" controls are hidden from the normal dashboard UI, and "Run all
+# collectors" never includes them regardless of this setting -- only an
+# explicit, individually-targeted run can trigger one. Set this to true (or
+# export KOREAN_TECH_WIRE_SHOW_EXPERIMENTAL=1) to reveal their run controls
+# again in the dashboard.
+show_experimental_sources: false
