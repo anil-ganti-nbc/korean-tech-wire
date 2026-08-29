@@ -152,3 +152,199 @@ def test_samsung_empty_or_malformed_metadata_is_safe():
     assert classify(SAMSUNG, article).accepted
 
 
+# -- zdnet_korea_semi_display ----------------------------------------------------
+
+def test_zdnet_keeps_real_onbeat_titles():
+    must_accept = [
+        "SK하이닉스, &#34;美인디애나 패키징팹서 HBM4E 양산…2029년 3분기 목표&#34;",
+        "&#34;LG디스플레이, 상반기 아이폰 OLED 3150만대 출하...21.6% 상승&#34;",
+        "삼성디스플레이, 제네시스 GV90에 투 탠덤 OLED 공급",
+        "인도 데이터센터 회사, 엔비디아 루빈 GPU 9000개 발주",
+        "삼성, 갤럭시A1 DDI 후공정 LB세미콘→대만 칩본드 변경...원가 절감 차원",
+        "인텔, 256코어",
+        "이재명 대통령, 이재용 회장 만나 서남권 반도체 투자 현안 푼다",
+        "&#34;폴더블 OLED, 애플 덕에 3년 정체 끝…연평균 12.2% 성장&#34;",
+    ]
+    for title in must_accept:
+        assert decision_for(ZDNET, title).accepted, title
+
+
+def test_zdnet_rejects_real_leakage_including_substring_collisions():
+    cases = {
+        # 'tv' matched inside 연합뉴스TV
+        "YTN·연합뉴스TV 승인기간 3개월 단축…사장추천위 구성 재명령": "no_semiconductor_or_display_signal",
+        # '전자' matched inside 운전자
+        "화물차 화재 목격한 우편 집배원, 운전자 구하고 불 껐다": "no_semiconductor_or_display_signal",
+        # '인텔' matched inside 인텔리전스 (threat-intelligence vendors)
+        "그룹아이비, 위협 인텔리전스 솔루션 AWS 마켓플레이스 등록": "threat_intelligence_item",
+        "&#34;AI발 보안리스크 관리 이렇게&#34;...에임인텔리전스, 내달 7일 컨퍼런스": "threat_intelligence_item",
+        # bare 공급/생산/설비 matched non-tech supply stories and events
+        "수요는 줄고 공급은 넘치고…중국 태양광업계 적자 심화": "no_semiconductor_or_display_signal",
+        "넵튠, 카카오페이에 H5게임 공급...미니게임 사업 강화": "no_semiconductor_or_display_signal",
+        "KCA, 수해 입은 거제·통영 선박 통신설비 무상점검": "no_semiconductor_or_display_signal",
+        "&#34;C레벨에 SW 공급망 보안 강조&#34;...스패로우, 연례 행사 개최": "no_semiconductor_or_display_signal",
+        "무뇨스 현대차 사장 &#34;중국 누구와도 경쟁&#34;…로봇 年 3만대 생산체제 구축": "no_semiconductor_or_display_signal",
+        "아톤, 나이스디앤에스에 악성문자 사전차단 플랫폼 공급": "no_semiconductor_or_display_signal",
+        # consumer product launch scope creep
+        "한국레노버, 리전 게이밍 모니터 신제품 4종 출시": "no_semiconductor_or_display_signal",
+        # generic '전자' company-name match, truncated recycling story
+        "LG전자, 폐가전서": "no_semiconductor_or_display_signal",
+    }
+    for title, reason in cases.items():
+        decision = decision_for(ZDNET, title)
+        assert not decision.accepted, title
+        assert decision.reason == reason, title
+
+
+def test_zdnet_borderline_items_remain_accepted_by_design():
+    # GPU/AI-infrastructure interviews, truncated company op-eds and battery
+    # research stay inside the vertical; they are documented borderline yield.
+    for title in [
+        "[AI 리더스] 엘리스그룹 &#34;GPU 확보 넘어",
+        "[기고] LG디스플레이는 왜",
+        "에너지연 &#34;전기차 폐배터리 30분이면 완벽 재생&#34;",
+    ]:
+        assert decision_for(ZDNET, title).accepted, title
+
+
+def test_zdnet_empty_title_and_empty_metadata_are_safe():
+    assert not decision_for(ZDNET, "").accepted
+    assert decision_for(ZDNET, "TSMC 2나노 파운드리 수율 60% 돌파").accepted
+
+
+# -- digitaltoday_semi_display ---------------------------------------------------
+
+def test_digitaltoday_source_keyword_taxonomy_rejects_finance_crypto_chatbot_entertainment():
+    # NOTE: Digital Today's news:keywords embed the outlet name and the full
+    # headline before its taxonomy tags ("디지털투데이 (DigitalToday), <headline>,
+    # <tags>"), so these are the exact stored keyword strings from production.
+    cases = {
+        # securities/disclosure actions (source's own taxonomy keywords)
+        "성호전자, 14회차 신주인수권부사채 행사로 신주 39만6640주 발행":
+            "디지털투데이 (DigitalToday), 성호전자, 14회차 신주인수권부사채 행사로 신주 39만6640주 발행, 성호전자,전자부품 제조업,코스닥,신주인수권행사,부채·채권,AI공시",
+        "센서뷰 김병남 대표이사, 소유 특정증권등 수량 452만9454주 보고…소유 비율 6.41%":
+            "디지털투데이 (DigitalToday), 센서뷰 김병남 대표이사, 소유 특정증권등 수량 452만9454주 보고…소유 비율 6.41%, 센서뷰,전자부품 제조업,코스닥,임원ㆍ주요주주특정증권등소유상황보고서,지배구조·경영권,AI공시",
+        "엣지파운드리, 제15회차 전환사채 100억원 만기 전 취득…소각 예정":
+            "디지털투데이 (DigitalToday), 엣지파운드리, 제15회차 전환사채 100억원 만기 전 취득…소각 예정, 엣지파운드리,전자부품 제조업,코스닥,전환사채(해외전환사채포함)발행후만기전사채취득,투자판단·경영,AI공시",
+        "제일기획, 최대주주 삼성전자 등 주식 1만1320주 감소…계열사 삼성생명보험 특별계정 장내매도 영향":
+            "디지털투데이 (DigitalToday), 제일기획, 최대주주 삼성전자 등 주식 1만1320주 감소…계열사 삼성생명보험 특별계정 장내매도 영향, 제일기획,광고업,코스피,최대주주등소유주식변동신고서,지배구조·경영권,AI공시",
+        "세방전지, 자회사 세방리튬배터리에 600억원 채무보증 결정":
+            "디지털투데이 (DigitalToday), 세방전지, 자회사 세방리튬배터리에 600억원 채무보증 결정, 세방전지,일차전지 및 이차전지 제조업,코스피,타인에대한채무보증결정,부채·채권,AI공시",
+        "아비코전자, 자회사 아비코테크에 70억원 금전대여 연장 결정":
+            "디지털투데이 (DigitalToday), 아비코전자, 자회사 아비코테크에 70억원 금전대여 연장 결정, 아비코전자,전자부품 제조업,코스닥,금전대여결정(자율공시),부채·채권,AI공시",
+        "유니슨, 단일판매공급계약으로 주권 매매거래 정지":
+            "디지털투데이 (DigitalToday), 유니슨, 단일판매공급계약으로 주권 매매거래 정지, 유니슨,일반 목적용 기계 제조업,코스닥,주권매매거래정지(단일판매공급계약),투자판단·경영,AI공시",
+        "SK이노, SKIET 흡수합병…&quot;배터리 사업 리스크 차단&quot;":
+            "디지털투데이 (DigitalToday), SK이노, SKIET 흡수합병…&quot;배터리 사업 리스크 차단&quot;, SK이노베이션,SKIET",
+        # crypto / market chatter
+        "비트코인 공급량 69% 수익권 진입…투입 자본 6170억달러는 아직 손실":
+            "디지털투데이 (DigitalToday), 비트코인 공급량 69% 수익권 진입…투입 자본 6170억달러는 아직 손실, 암호화폐,비트코인",
+        "[데일리픽] XRP 외면하는 블랙록?…스마트폰·PC 얼마나 더 오르나":
+            "디지털투데이 (DigitalToday), [데일리픽] XRP 외면하는 블랙록?…스마트폰·PC 얼마나 더 오르나, 데일리픽,블랙록,XRP,비트코인,크립토,ETF,파생상품,글래스노드,창펑자오,스마트폰,컴퓨터,메모리,D램,육군,마이크로원자로,오픈AI,보안,넥슨,던파",
+        # chatbot-product features ('메모리 공유' is an AI memory, not DRAM)
+        "클로드, 채팅 기억 바로 작업에 반영…코워크와 메모리 공유":
+            "디지털투데이 (DigitalToday), 클로드, 채팅 기억 바로 작업에 반영…코워크와 메모리 공유, 클로드,앤트로픽,코워크,메모리,통합,공유",
+        # entertainment/production industry label
+        "키이스트, KBS 사극 문무 제작 공급 계약 체결…225억4000만원 규모":
+            "디지털투데이 (DigitalToday), 키이스트, KBS 사극 문무 제작 공급 계약 체결…225억4000만원 규모, 키이스트,영화 비디오물 방송프로그램 제작 및 배급업,코스닥,단일판매ㆍ공급계약체결,공급계약,AI공시",
+    }
+    for title, keywords in cases.items():
+        decision = decision_for(DIGITALTODAY, title, metadata={"keywords": keywords})
+        assert not decision.accepted, title
+        assert decision.reason == "offbeat_source_keyword", title
+
+
+def test_digitaltoday_keyword_stage_is_noop_without_keywords_metadata():
+    # Without keywords the allowlist alone still rejects these (they carry no
+    # vertical signal once the unanchored generic terms are gone).
+    decision = decision_for(DIGITALTODAY, "성호전자, 14회차 신주인수권부사채 행사로 신주 39만6640주 발행")
+    assert not decision.accepted
+    assert decision.reason == "no_semiconductor_or_display_signal"
+
+
+def test_digitaltoday_malformed_keyword_values_are_skipped_safely():
+    assert decision_for(DIGITALTODAY, "와이씨, 삼성전자에 반도체 검사장비 1621억5000만원 규모 공급 계약", metadata={"keywords": 12345}).accepted
+    assert decision_for(DIGITALTODAY, "와이씨, 삼성전자에 반도체 검사장비 1621억5000만원 규모 공급 계약", metadata={"keywords": None}).accepted
+    assert decision_for(DIGITALTODAY, "와이씨, 삼성전자에 반도체 검사장비 1621억5000만원 규모 공급 계약", metadata={}).accepted
+
+
+def test_digitaltoday_rejects_real_leakage():
+    must_reject = [
+        "애플, 미국서 애플TV 월 14.99달러로 인상",  # 'tv' inside 애플TV
+        "우편 배달 중 불붙은 화물차 발견…집배원이 운전자 구했다",  # '전자' inside 운전자
+        "금호건설, 평택고덕 STV 2차 지식산업센터 수분양자 중도금 대출 연대보증 271억원 결정",  # 'tv' inside STV
+        "앤트로픽, 피지컬 AI로 확장...하드웨어판 MCP 'MHS' 공개",  # 'mcp' = Model Context Protocol
+        "구글, 제미나이 노트북에 구매 도서 연동…책 내용으로 질문·생성 지원",
+        "엔비디아, 어닝 서프라이즈에도 주가 하락...AI 과잉 투자 불안 반영",
+        "엔비디아 지포스 나우, 연내 스팀 컨트롤러·스팀 머신 공식 지원",
+        "삼성전자, 경상 수해 복구에 30억원 지원",
+        "&quot;언제 어디서나 게이밍&quot; 삼성전자, 게임스컴서 '기기 연결' 전략 강조",
+        "2분기 스마트폰 판매 톱10 &quot;아이폰 5종·갤럭시 5종&quot;",
+        "삼성 '갤럭시 S26 FE' 출격…104만원대에 플래그십 성능 무장",
+        "레인지로버 새 전기 GT 윤곽 드러나…2027년 상반기 생산 예정",
+        "테슬라, 네바다 세미 공장 9월 개장식…연 5만대 생산 시험대",
+        "서호전기, 중국 중공업사에 크레인 제어 시스템 137억원 규모 공급 계약",
+        "유니슨, 동촌풍력발전에 고창해상풍력 풍력발전기 공급 계약…992억8700만원 규모",
+        "한국정밀기계, 터키 TEI에 CNC VTL 78억원 규모 공급계약 체결",
+        "유진테크놀로지, 헝가리 각형 자동차용 노칭금형 공급계약 48억원 수주",
+        "아진전자부품, 한온시스템에 차량용 발향유닛 2028년부터 공급",
+        "스패로우, 애플리케이션 시큐리티 서밋 2026 개최...C레벨 대상 SW 공급망 보안 전략 공유.",
+        "넵튠, 카카오페이 미니게임 파트너사 선정…H5 게임 공급",
+        "엔비디아·스트라이프가 노린 오픈웨이트 AI…빅테크 인수전 확산",
+        "엔비디아, 18조원에 허깅페이스 인수 추진…오픈소스 AI 심장부까지 삼킨다",
+        "리퀴드 AI, 스마트폰용 AI 벤치마크 앱 '피펫' 출시…무료 이용 가능",
+        "모두싸인, 경남교육청 ‘고입전형 지원 온라인시스템’에 공공용 전자서명 제공",
+        "엔비디아, AI 클라우드 매출 배분 프로그램 일부 거래 중단",
+        "엔비디아, 美 규제에도 中과 손잡았다…딥시크·큐웬 지원 확대",
+        "엔비디아 &quot;매출 70% 뛴다&quot;…애플·알파벳 제치고 아마존까지 넘보나",
+    ]
+    for title in must_reject:
+        assert not decision_for(DIGITALTODAY, title).accepted, title
+
+
+def test_digitaltoday_keeps_real_onbeat_titles():
+    must_accept = [
+        "디에스앤지, 네이버클라우드에 엔비디아 B300 GPU서버 389대 공급 계약",
+        "와이씨, 삼성전자에 반도체 검사장비 1621억5000만원 규모 공급 계약",
+        "피덜릭스, Alliance Memory에 메모리반도체 공급 계약 체결…계약금액 123억9217만원",
+        "씨이랩, 한국인프라에 NVIDIA H200 NVL 38억9250만원 규모 공급 계약 체결",
+        "엔비디아, 'NVHBM' 공개...HBM 컨트롤러 직접 설계",
+        "빨라지는 SK하이닉스 메모리 시간표…팹 인프라 준공·착공 '착착'",
+        "SK하이닉스, 미국 인디애나 패키징 팹 기공식 라이브 중계",
+        "스마트폰·PC 원가 15~40% 오른다…범용 D램 부족發 악순환",
+        "中 CXMT 생산 한계 도달…D램 공급난 완화 기대 꺾였다",
+        "中 CXMT·YMTC 물량공세 예고…D램·낸드 공급 판도 바뀌나",
+        "AI 메모리 호황이 바꾼 美 지방 도시…마이크론 500억달러 증설에 지역경제 '들썩'",
+        "엔비디아보다 빠르고 효율적?…오픈AI, 자체 AI칩 '할라피뇨' 성능 공개",
+        "IBM, Z 메인프레임·리눅스원용 Arm 듀얼 아키텍처 칩 개발",
+        "당정, AI·3대 메가프로젝트 투자 총력…반도체 특별회계도 신설",
+        "호남 반도체·AI 데이터센터 '예타 면제'…3대 메가 프로젝트 속도",
+        "스페이스XAI, 엔비디아 '베라 CPU' 대규모 도입…2027년 우주 AI 시스템 구축",
+        "애플 M6, 기본형 첫 3종 CPU 코어 구성 적용",
+        "AMD, 모바일·데스크톱 CPU 점유율 사상 첫 30% 돌파…'인텔 천하' 흔든다",
+        "1년 걸리던 반도체 칩 설계, 단 2주 만에…아키텍트랩스 '레드우드' 공개",
+        "하나마이크론 &quot;시스템 반도체·패키징 경쟁력 높이겠다&quot;",
+        "美 상무부, 중국 AI 기업 겨냥 반도체 우회 접근 차단 추진",
+        "삼성전자,  세계 첫 360Hz OLED 게이밍모니터 공개",
+        "톱텍, 모비스 북미 전동화 법인에 각형 REEV 배터리 조립라인 211억원 규모 공급 계약",
+        "이노메트리, 미국에 ESS용 2차전지 검사장비 49억원 규모 공급 계약",
+        "[모빌리티핫이슈] 로보택시 삼국지…中 전고체 배터리 상용화 질주",
+        "마니커에프앤지, 용인 반도체 클러스터 조성에 토지 수용…556억2391만원 규모",
+    ]
+    for title in must_accept:
+        assert decision_for(DIGITALTODAY, title).accepted, title
+
+
+def test_digitaltoday_documented_residual_battery_polysemy():
+    # Accepted trade-off: '배터리' stays in scope (editorial policy lists
+    # relevant batteries), so two consumer-advice headlines in four days of
+    # history still pass. Pinned here so the residual is explicit, not silent.
+    for title in [
+        "디지털 키 탑재 스마트폰, 배터리 방전되면 어떻게?",
+        "전기차 교체 기준 달라졌다…배터리보다 '승하차 편의'가 변수",
+    ]:
+        assert decision_for(DIGITALTODAY, title).accepted, title
+
+
+def test_digitaltoday_empty_title_rejected():
+    assert not decision_for(DIGITALTODAY, "").accepted
