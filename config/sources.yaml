@@ -9,6 +9,9 @@
 # pagination exists), one genuine novelty item captured 2026-08-19, stable resights,
 # zero false positives. Editorial yield is genuinely low (~1 item/month, PR-heavy);
 # that is the source's real publishing rate, not a collection defect.
+# 2026-08-30 natural production proof: run_id 2708, 15:48:57Z, natural due-aware
+# scheduler fire — fetch ok, 4 accepted / 1 rejected / 0 new / 4 resighted,
+# 0 extraction failures (healthy-quiet outcome).
 sources:
   zdnet_korea_semi_display:
     name: "ZDNet Korea (semiconductor/display vertical)"
