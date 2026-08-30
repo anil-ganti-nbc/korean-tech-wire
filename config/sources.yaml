@@ -3,6 +3,12 @@
 # EXPERIMENTAL. See docs/stage4-editorial-yield.md and docs/promotion-policy.md.
 # 2026-08-25: ZDNet Korea (official feed, robots-declared) and Digital Today
 # (Google News sitemap) added as EXPERIMENTAL; see docs/source-research.md addendum.
+# 2026-08-30: LG Display Newsroom promoted to PRODUCTION per docs/promotion-policy.md
+# quiet-source clause: continuous healthy natural soak since 2026-08-10 (~200 cycles,
+# 99% success), source surface verified complete (5-card latest-news page, no
+# pagination exists), one genuine novelty item captured 2026-08-19, stable resights,
+# zero false positives. Editorial yield is genuinely low (~1 item/month, PR-heavy);
+# that is the source's real publishing rate, not a collection defect.
 sources:
   zdnet_korea_semi_display:
     name: "ZDNet Korea (semiconductor/display vertical)"
@@ -59,7 +65,7 @@ sources:
     beats: [mobile, displays, semiconductors, consumer_electronics]
   lg_display_newsroom:
     name: "LG Display Latest News Korea"
-    status: EXPERIMENTAL
+    status: PRODUCTION
     enabled: true
     collector: lgdisplay_html
     url: https://www.lgdisplay.com/kor/company/media-center/latest-news
