@@ -37,6 +37,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from .database import SchemaCompatibility, SchemaCompatibilityError
+
 # KTW's own naming for the four terminal QC decisions, chosen to match the
 # vocabulary Chinese Tech Wire's quick-tap lead feedback already uses
 # (USEFUL / NOT_USEFUL / DUPLICATE / FALSE_POSITIVE) rather than inventing
@@ -44,6 +46,7 @@ from typing import Iterable
 # news lead, so DUPLICATE (a story that is no longer novel / already
 # covered) is KTW's equivalent terminal decision for that slot.
 QC_DECISIONS = ("USEFUL", "NOT_USEFUL", "FALSE_POSITIVE", "DUPLICATE")
+QC_SCHEMA_VERSION = 1
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS qc_decisions (
@@ -81,15 +84,71 @@ class QCArchive:
     def __init__(self, path: Path):
         self.path = path
 
-    def connect(self) -> sqlite3.Connection:
+    def _connect_unchecked(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
         return connection
 
+    def inspect_compatibility(self) -> SchemaCompatibility:
+        """Read the archive contract without creating or changing its file."""
+        if not self.path.exists():
+            return SchemaCompatibility("FRESH", QC_SCHEMA_VERSION, (), "QC archive does not exist")
+        try:
+            uri = self.path.resolve().as_uri() + "?mode=ro"
+            with sqlite3.connect(uri, uri=True) as con:
+                integrity = con.execute("PRAGMA integrity_check").fetchone()[0]
+                if integrity != "ok":
+                    return SchemaCompatibility("CORRUPT", QC_SCHEMA_VERSION, (), f"QC archive integrity check failed: {integrity}")
+                rows = con.execute("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").fetchall()
+                tables = {name for kind, name in rows if kind == "table"}
+                indexes = {name for kind, name in rows if kind == "index"}
+                if not tables:
+                    return SchemaCompatibility("FRESH", QC_SCHEMA_VERSION, (), "QC archive is empty")
+                if "qc_schema_migrations" not in tables:
+                    return SchemaCompatibility("UNKNOWN", QC_SCHEMA_VERSION, (), "non-empty QC archive has no version marker")
+                marker_columns = {row[1] for row in con.execute("PRAGMA table_info(qc_schema_migrations)")}
+                if not {"version", "applied_at"}.issubset(marker_columns):
+                    return SchemaCompatibility("CORRUPT", QC_SCHEMA_VERSION, (), "QC archive marker shape is invalid")
+                versions = tuple(row[0] for row in con.execute("SELECT version FROM qc_schema_migrations ORDER BY version"))
+                if any(not isinstance(version, int) or version <= 0 for version in versions):
+                    return SchemaCompatibility("CORRUPT", QC_SCHEMA_VERSION, (), "QC archive marker contains an invalid version")
+                if any(version > QC_SCHEMA_VERSION for version in versions):
+                    return SchemaCompatibility("INCOMPATIBLE_NEWER", QC_SCHEMA_VERSION, versions, "QC archive is newer than this KTW binary")
+                required_tables = {"qc_decisions", "qc_schema_migrations"}
+                required_indexes = {"qc_decisions_decided_at_idx", "qc_decisions_source_idx"}
+                if versions == (QC_SCHEMA_VERSION,) and required_tables.issubset(tables) and required_indexes.issubset(indexes):
+                    return SchemaCompatibility("COMPATIBLE", QC_SCHEMA_VERSION, versions, "exact QC archive contract is present")
+                if versions in {(), (QC_SCHEMA_VERSION,)}:
+                    return SchemaCompatibility("PARTIAL", QC_SCHEMA_VERSION, versions, "QC archive marker and structure disagree")
+                return SchemaCompatibility("CORRUPT", QC_SCHEMA_VERSION, versions, "QC archive marker is not a valid numbered contract")
+        except sqlite3.Error as error:
+            return SchemaCompatibility("CORRUPT", QC_SCHEMA_VERSION, (), f"QC archive inspection failed: {error}")
+
+    def require_compatible(self) -> SchemaCompatibility:
+        status = self.inspect_compatibility()
+        if not status.ready:
+            raise SchemaCompatibilityError(f"KTW QC archive compatibility gate refused normal work: {status.state}: {status.reason}")
+        return status
+
+    def connect(self) -> sqlite3.Connection:
+        self.require_compatible()
+        return self._connect_unchecked()
+
     def migrate(self) -> None:
-        with self.connect() as con:
+        """Canonical bootstrap for a genuinely empty QC archive only."""
+        before = self.inspect_compatibility()
+        if before.ready:
+            return
+        if before.state != "FRESH":
+            raise SchemaCompatibilityError(
+                f"KTW QC archive migration refused {before.state} state: {before.reason}"
+            )
+        with self._connect_unchecked() as con:
+            con.execute("CREATE TABLE IF NOT EXISTS qc_schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
             con.executescript(_SCHEMA)
+            con.execute("INSERT INTO qc_schema_migrations(version, applied_at) VALUES (?, ?)", (QC_SCHEMA_VERSION, _iso()))
+        self.require_compatible()
 
     def decided_article_ids(self) -> set[int]:
         with self.connect() as con:

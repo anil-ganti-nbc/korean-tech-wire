@@ -16,7 +16,10 @@ from .qualification import QualificationProvenance
 ROOT = Path.cwd()
 
 def context(args: argparse.Namespace):
-    settings = load_settings(Path(args.config)); database = Database(settings.database_path); database.migrate()
+    settings = load_settings(Path(args.config)); database = Database(settings.database_path)
+    # This is the sole CLI startup boundary allowed to invoke the canonical
+    # migration mechanism.  Every command receives a post-check-compatible DB.
+    database.migrate(); database.require_compatible()
     return settings, database, load_sources(Path(args.sources))
 
 def main() -> None:

@@ -25,6 +25,12 @@ There are deliberately no scheduled tasks or notifications in this bootstrap. Pr
 
 `soak` is a portable foreground runner, not a scheduler. Each cycle invokes normal collectors against the configured database; stopping it cleanly leaves completed runs in SQLite, and rerunning it safely resumes the evidence history. Its default two-hour interval is intended for a real working-day/multi-day observation, not rapid artificial load.
 
+## Persistent-state compatibility
+
+KTW has two independent SQLite stores: the main collector database and the QC archive beside it. The main database uses the checked-in numbered schema history through version 5; the QC archive has its own numbered ledger at version 1. CLI and dashboard startup are the canonical migration boundaries. They may create an empty store or advance a valid older numbered prefix, then re-check the exact expected schema before any normal read, scheduler due-check, collection, qualification, dashboard, or QC action can use it.
+
+An existing non-empty store with a missing or invalid migration ledger, partial schema, corrupt SQLite file, or a newer schema version is refused without destructive repair. An older program therefore cannot silently run against a newer database, and a current program will not stamp, recreate, or guess the history of an unknown archive. Preserve the database and investigate or restore it using the approved operational recovery process; do not delete schema markers or database files to force startup. This source contract does not itself perform rollback or production migration work.
+
 After deploying the Samsung structural fix, run the one-time, conservative historical cleanup before checking latest articles:
 
 ```powershell

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib, json, sqlite3
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable
@@ -85,6 +85,50 @@ CREATE TABLE qualification_terminals (
 CREATE INDEX qualification_terminals_scope_idx ON qualification_terminals(scope_key, epoch_id);
 """)]
 
+# This is the application/state contract.  Do not infer it from a table's
+# existence: a current KTW binary requires every numbered migration through
+# this explicit version before it may perform normal work.
+SCHEMA_VERSION = 5
+
+
+class SchemaCompatibilityError(RuntimeError):
+    """Raised before normal work when persistent state is not proven safe."""
+
+
+@dataclass(frozen=True)
+class SchemaCompatibility:
+    """Read-only observation of KTW's numbered SQLite schema contract."""
+
+    state: str
+    expected_version: int
+    observed_versions: tuple[int, ...] = ()
+    reason: str = ""
+
+    @property
+    def ready(self) -> bool:
+        return self.state == "COMPATIBLE"
+
+
+_REQUIRED_BY_VERSION: dict[int, dict[str, set[tuple[str, str]] | set[str]]] = {
+    1: {
+        "tables": {"sources", "runs", "run_errors", "fetch_attempts", "articles"},
+        "columns": {("articles", "canonical_url"), ("runs", "started_at")},
+        "indexes": {"articles_seen_idx", "articles_source_article_id_idx"},
+    },
+    2: {"tables": set(), "columns": {("articles", "record_status")}, "indexes": {"articles_status_idx"}},
+    3: {"tables": {"source_run_health"}, "columns": set(), "indexes": {"source_run_health_source_idx"}},
+    4: {"tables": {"article_feedback"}, "columns": set(), "indexes": {"article_feedback_article_idx"}},
+    5: {
+        "tables": {"qualification_scopes", "qualification_epochs", "qualification_resets", "qualification_terminals"},
+        "columns": {
+            ("runs", "provenance"), ("runs", "qualification_scope"),
+            ("runs", "qualification_epoch_id"), ("runs", "qualification_material_identity"),
+            ("runs", "qualification_gate_status"),
+        },
+        "indexes": {"qualification_epochs_scope_idx", "qualification_terminals_scope_idx"},
+    },
+}
+
 def iso(value: datetime | None = None) -> str:
     return (value or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
 
@@ -103,15 +147,123 @@ class Database:
         self._clock = clock or (lambda: datetime.now(timezone.utc))
     def _iso(self, value: datetime | None = None) -> str:
         return iso(value or self._clock())
+
+    def _connect_unchecked(self) -> sqlite3.Connection:
+        """Open for the canonical migration path only, never normal work."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(self.path)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    def _read_schema(self) -> tuple[set[str], set[str], dict[str, set[str]], tuple[int, ...], str | None]:
+        """Inspect existing state without creating a file, table, or marker."""
+        if not self.path.exists():
+            return set(), set(), {}, (), None
+        try:
+            uri = self.path.resolve().as_uri() + "?mode=ro"
+            with sqlite3.connect(uri, uri=True) as con:
+                integrity = con.execute("PRAGMA integrity_check").fetchone()[0]
+                if integrity != "ok":
+                    return set(), set(), {}, (), f"integrity check failed: {integrity}"
+                rows = con.execute(
+                    "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+                ).fetchall()
+                tables = {name for kind, name in rows if kind == "table"}
+                indexes = {name for kind, name in rows if kind == "index"}
+                columns = {
+                    table: {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
+                    for table in tables
+                }
+                if "schema_migrations" not in tables:
+                    return tables, indexes, columns, (), None
+                marker_columns = columns["schema_migrations"]
+                if not {"version", "applied_at"}.issubset(marker_columns):
+                    return tables, indexes, columns, (), "schema_migrations has an invalid marker shape"
+                versions: list[int] = []
+                for (value,) in con.execute("SELECT version FROM schema_migrations ORDER BY version"):
+                    if not isinstance(value, int):
+                        return tables, indexes, columns, (), "schema_migrations contains a non-integer version"
+                    versions.append(value)
+                return tables, indexes, columns, tuple(versions), None
+        except sqlite3.Error as error:
+            return set(), set(), {}, (), f"schema inspection failed: {error}"
+
+    @staticmethod
+    def _has_required_structure(tables: set[str], indexes: set[str], columns: dict[str, set[str]], through: int) -> bool:
+        for version in range(1, through + 1):
+            required = _REQUIRED_BY_VERSION[version]
+            if not required["tables"].issubset(tables):
+                return False
+            if not required["indexes"].issubset(indexes):
+                return False
+            if any(column not in columns.get(table, set()) for table, column in required["columns"]):
+                return False
+        return True
+
+    @staticmethod
+    def _has_future_structure(tables: set[str], indexes: set[str], columns: dict[str, set[str]], after: int) -> bool:
+        for version in range(after + 1, SCHEMA_VERSION + 1):
+            required = _REQUIRED_BY_VERSION[version]
+            if required["tables"] & tables or required["indexes"] & indexes:
+                return True
+            if any(column in columns.get(table, set()) for table, column in required["columns"]):
+                return True
+        return False
+
+    def inspect_compatibility(self) -> SchemaCompatibility:
+        """Return an auditable, non-destructive compatibility observation."""
+        tables, indexes, columns, versions, error = self._read_schema()
+        if error:
+            return SchemaCompatibility("CORRUPT", SCHEMA_VERSION, versions, error)
+        non_marker_tables = tables - {"schema_migrations"}
+        if not tables:
+            return SchemaCompatibility("FRESH", SCHEMA_VERSION, (), "database does not exist or is empty")
+        if "schema_migrations" not in tables:
+            return SchemaCompatibility("UNKNOWN", SCHEMA_VERSION, (), "non-empty database has no schema_migrations marker")
+        if any(version <= 0 for version in versions):
+            return SchemaCompatibility("CORRUPT", SCHEMA_VERSION, versions, "schema_migrations contains an invalid version")
+        if any(version > SCHEMA_VERSION for version in versions):
+            return SchemaCompatibility("INCOMPATIBLE_NEWER", SCHEMA_VERSION, versions, "database schema is newer than this KTW binary")
+        expected_prefix = tuple(range(1, (versions[-1] if versions else 0) + 1))
+        if versions != expected_prefix:
+            return SchemaCompatibility("PARTIAL", SCHEMA_VERSION, versions, "schema_migrations is not a contiguous numbered prefix")
+        applied = versions[-1] if versions else 0
+        if applied and not self._has_required_structure(tables, indexes, columns, applied):
+            return SchemaCompatibility("PARTIAL", SCHEMA_VERSION, versions, "marked migration structure is incomplete or contradictory")
+        if self._has_future_structure(tables, indexes, columns, applied):
+            return SchemaCompatibility("PARTIAL", SCHEMA_VERSION, versions, "database contains unmarked future migration structure")
+        if applied == SCHEMA_VERSION:
+            return SchemaCompatibility("COMPATIBLE", SCHEMA_VERSION, versions, "exact numbered schema contract is present")
+        if applied == 0 and non_marker_tables:
+            return SchemaCompatibility("PARTIAL", SCHEMA_VERSION, versions, "empty migration marker conflicts with existing application tables")
+        return SchemaCompatibility("MIGRATION_REQUIRED", SCHEMA_VERSION, versions, "older valid numbered schema requires canonical migration")
+
+    def require_compatible(self) -> SchemaCompatibility:
+        status = self.inspect_compatibility()
+        if not status.ready:
+            raise SchemaCompatibilityError(f"KTW database compatibility gate refused normal work: {status.state}: {status.reason}")
+        return status
+
     def connect(self) -> sqlite3.Connection:
-        self.path.parent.mkdir(parents=True, exist_ok=True); connection = sqlite3.connect(self.path); connection.row_factory = sqlite3.Row; return connection
+        self.require_compatible()
+        return self._connect_unchecked()
+
     def migrate(self) -> None:
-        with self.connect() as con:
+        """Canonical, explicit numbered migration path; never a normal-work fallback."""
+        before = self.inspect_compatibility()
+        if before.ready:
+            return
+        if before.state not in {"FRESH", "MIGRATION_REQUIRED"}:
+            raise SchemaCompatibilityError(
+                f"KTW canonical migration refused {before.state} state: {before.reason}"
+            )
+        with self._connect_unchecked() as con:
             con.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
             done = {row[0] for row in con.execute("SELECT version FROM schema_migrations")}
             for version, sql in MIGRATIONS:
                 if version not in done:
                     con.executescript(sql); con.execute("INSERT INTO schema_migrations VALUES (?, ?)", (version, self._iso()))
+        self.require_compatible()
     def start_run(self, source_id: str | None, provenance: str = "UNKNOWN") -> int:
         with self.connect() as con:
             return con.execute("INSERT INTO runs(source_id, started_at, provenance) VALUES (?, ?, ?)", (source_id, self._iso(), provenance)).lastrowid

@@ -171,7 +171,10 @@ def _qc_archive_path(database: Database) -> Path:
 def _database() -> tuple[Database, dict[str, object], QCArchive]:
     settings = load_settings(CONFIG)
     database = Database(settings.database_path)
+    # Dashboard startup is an explicit canonical migration boundary, followed
+    # by a read-only proof before any route can use persistent state.
     database.migrate()
+    database.require_compatible()
     sources = _source_map()
     database.sync_sources(sources.values())
     # QC decisions live in their own on-disk file, never in the live
@@ -179,6 +182,7 @@ def _database() -> tuple[Database, dict[str, object], QCArchive]:
     # migrates or mutates korean_tech_wire.db's own schema.
     archive = QCArchive(_qc_archive_path(database))
     archive.migrate()
+    archive.require_compatible()
     return database, sources, archive
 
 
