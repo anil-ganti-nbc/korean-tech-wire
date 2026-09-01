@@ -11,6 +11,7 @@ from .locking import LockUnavailable, RunLock
 from .scheduling import DEFAULT_INTERVAL_SECONDS, describe
 from .soak import run_soak
 from .storage import Database
+from .qualification import QualificationProvenance
 
 ROOT = Path.cwd()
 
@@ -42,7 +43,7 @@ def main() -> None:
             print(f"Production scope: {len(selected)} source(s)" + (" — " + ", ".join(source.id for source in selected) if selected else " (allowlist is empty)"))
         try:
             with RunLock(settings.database_path.with_name(settings.database_path.name + ".lock")):
-                summary = run_collectors(sources, settings, database, args.source, production_only=args.production)
+                summary = run_collectors(sources, settings, database, args.source, production_only=args.production, provenance=QualificationProvenance.MANUAL)
         except LockUnavailable as error:
             raise SystemExit(str(error))
         print(f"Run: {'success' if not summary.failed else 'partial failure'}\nSources attempted: {summary.attempted}; succeeded: {summary.succeeded}; failed: {summary.failed}\nReferences discovered: {summary.discovered}; accepted: {summary.accepted}; rejected: {summary.rejected}\nNew articles: {summary.new}; existing articles: {summary.existing}; timestamped: {summary.timestamped}; extraction failures: {summary.extraction_failed}")

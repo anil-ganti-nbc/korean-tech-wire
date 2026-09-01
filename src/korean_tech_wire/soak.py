@@ -9,6 +9,7 @@ from .discovery import RunSummary, run_collectors
 from .models import Source
 from .scheduling import due_sources
 from .storage import Database
+from .qualification import QualificationProvenance
 
 
 def default_now() -> datetime:
@@ -44,7 +45,10 @@ def run_soak(
         else:
             due = selected
         for source_id in due:
-            summaries.append(run_collectors(list(sources), settings, database, source_id=source_id))
+            summaries.append(run_collectors(
+                list(sources), settings, database, source_id=source_id,
+                provenance=(QualificationProvenance.SCHEDULED if if_due else QualificationProvenance.MANUAL),
+            ))
         if cycle + 1 < cycles:
             sleep(interval_seconds)
     return summaries

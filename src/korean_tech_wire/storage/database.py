@@ -29,6 +29,60 @@ CREATE INDEX source_run_health_source_idx ON source_run_health(source_id, attemp
 """), (4, """
 CREATE TABLE article_feedback (id INTEGER PRIMARY KEY, article_id INTEGER NOT NULL, outcome TEXT NOT NULL, note TEXT, created_at TEXT NOT NULL, FOREIGN KEY(article_id) REFERENCES articles(id));
 CREATE INDEX article_feedback_article_idx ON article_feedback(article_id, created_at DESC);
+"""), (5, """
+ALTER TABLE runs ADD COLUMN provenance TEXT NOT NULL DEFAULT 'UNKNOWN';
+ALTER TABLE runs ADD COLUMN qualification_scope TEXT;
+ALTER TABLE runs ADD COLUMN qualification_epoch_id INTEGER;
+ALTER TABLE runs ADD COLUMN qualification_material_identity TEXT;
+ALTER TABLE runs ADD COLUMN qualification_gate_status TEXT NOT NULL DEFAULT 'UNKNOWN';
+CREATE TABLE qualification_scopes (
+    scope_key TEXT PRIMARY KEY,
+    epoch_id INTEGER NOT NULL,
+    material_identity TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE qualification_epochs (
+    id INTEGER PRIMARY KEY,
+    scope_key TEXT NOT NULL,
+    epoch_number INTEGER NOT NULL,
+    material_identity TEXT NOT NULL,
+    prior_material_identity TEXT,
+    reset_reason TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE(scope_key, epoch_number)
+);
+CREATE INDEX qualification_epochs_scope_idx ON qualification_epochs(scope_key, epoch_number);
+CREATE TABLE qualification_resets (
+    id INTEGER PRIMARY KEY,
+    run_id INTEGER NOT NULL,
+    source_id TEXT NOT NULL,
+    scope_key TEXT NOT NULL,
+    epoch_id INTEGER NOT NULL,
+    prior_material_identity TEXT,
+    new_material_identity TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    provenance TEXT NOT NULL DEFAULT 'UNKNOWN',
+    created_at TEXT NOT NULL,
+    UNIQUE(run_id, scope_key),
+    FOREIGN KEY(run_id) REFERENCES runs(id),
+    FOREIGN KEY(epoch_id) REFERENCES qualification_epochs(id)
+);
+CREATE TABLE qualification_terminals (
+    id INTEGER PRIMARY KEY,
+    run_id INTEGER NOT NULL,
+    source_id TEXT NOT NULL,
+    scope_key TEXT NOT NULL,
+    epoch_id INTEGER NOT NULL,
+    material_identity TEXT NOT NULL,
+    provenance TEXT NOT NULL DEFAULT 'UNKNOWN',
+    status TEXT NOT NULL,
+    counts_for_qualification INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    UNIQUE(run_id, scope_key),
+    FOREIGN KEY(run_id) REFERENCES runs(id),
+    FOREIGN KEY(epoch_id) REFERENCES qualification_epochs(id)
+);
+CREATE INDEX qualification_terminals_scope_idx ON qualification_terminals(scope_key, epoch_id);
 """)]
 
 def iso(value: datetime | None = None) -> str:
@@ -58,9 +112,9 @@ class Database:
             for version, sql in MIGRATIONS:
                 if version not in done:
                     con.executescript(sql); con.execute("INSERT INTO schema_migrations VALUES (?, ?)", (version, self._iso()))
-    def start_run(self, source_id: str | None) -> int:
+    def start_run(self, source_id: str | None, provenance: str = "UNKNOWN") -> int:
         with self.connect() as con:
-            return con.execute("INSERT INTO runs(source_id, started_at) VALUES (?, ?)", (source_id, self._iso())).lastrowid
+            return con.execute("INSERT INTO runs(source_id, started_at, provenance) VALUES (?, ?, ?)", (source_id, self._iso(), provenance)).lastrowid
     def sync_sources(self, sources: Iterable[Source]) -> None:
         with self.connect() as con:
             for source in sources:
