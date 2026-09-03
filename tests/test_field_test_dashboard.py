@@ -320,3 +320,37 @@ def test_collect_now_uses_core_reports_status_refuses_overlap_and_populates(monk
         assert "No local leads yet" not in page
     finally:
         server.shutdown(); thread.join(); server.server_close()
+
+
+def test_com009_run_history_attributes_the_failed_phase(monkeypatch, tmp_path):
+    """STD-UI-COM-009: two runs that both end 'partial_failure' for materially
+    different reasons must not render identically. The backend keeps the
+    distinction per run (run_errors.error_type, plus the post-discovery
+    counters in summary_json); Run History has to carry it."""
+    database = _seed(monkeypatch, tmp_path)
+
+    fetch_run = database.start_run(None)
+    database.record_error(fetch_run, "the_elec", "URLError", "connection refused")
+    database.finish_run(fetch_run, "partial_failure", RunSummary(attempted=1, failed=1))
+
+    parse_run = database.start_run(None)
+    database.record_error(parse_run, "etnews_hardware", "ValueError", "unparseable listing")
+    database.finish_run(
+        parse_run, "partial_failure",
+        RunSummary(attempted=1, failed=1, discovered=9, accepted=4, extraction_failed=5, rejected=3, timestamped=2),
+    )
+
+    server = serve(port=0, mutation_authorizer=lambda _headers: True)
+    thread = Thread(target=server.serve_forever); thread.start()
+    try:
+        with urlopen(f"http://127.0.0.1:{server.server_port}/") as response:
+            page = response.read().decode("utf-8")
+    finally:
+        server.shutdown(); thread.join(); server.server_close()
+
+    # The failing phase is attributed per run, not collapsed into one badge.
+    assert "the_elec: URLError" in page
+    assert "etnews_hardware: ValueError" in page
+    # Post-discovery outcomes are a different remediation from a fetch failure.
+    assert "5 extraction" in page
+    assert "3 rejected" in page
