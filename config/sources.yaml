@@ -58,6 +58,35 @@ sources:
     url: https://news.skhynix.co.kr/feed/
     timezone: Asia/Seoul
     beats: [memory, semiconductors, manufacturing]
+  # SK hynix publishes an English edition on a SEPARATE first-party host that
+  # is reachable from the deployment host, while news.skhynix.co.kr answers 403
+  # to this host's egress at its AWS load balancer (see the Korean source's
+  # access_blocked health). This is registered as an INDEPENDENT source, never
+  # an alias or migration of the Korean one:
+  #
+  #   - its own source id, so identity and dedupe (UNIQUE(source_id,
+  #     canonical_url)) are a fresh namespace; no Korean article can ever be
+  #     reused as this source's novelty history
+  #   - its own baseline: baseline_has_content() is source-scoped, so this
+  #     source establishes its own first-seen set from scratch. FIRST SEEN IS
+  #     NOT NOVELTY -- run one persists a baseline, it does not mean 10 new
+  #     stories broke
+  #   - EXPERIMENTAL, so it is excluded from production-only runs and from the
+  #     dashboard's "Run all collectors" until it earns promotion on its own
+  #     evidence under docs/promotion-policy.md
+  #
+  # The two editions carry the same underlying stories under different
+  # canonical URLs and different languages. They are deliberately NOT
+  # deduplicated against each other: cross-edition correlation would be an
+  # editorial judgement this collector layer does not make.
+  sk_hynix_newsroom_global:
+    name: "SK hynix Newsroom Global (English)"
+    status: EXPERIMENTAL
+    enabled: true
+    collector: rss
+    url: https://news.skhynix.com/en/feed/
+    timezone: UTC
+    beats: [memory, semiconductors, manufacturing]
   samsung_newsroom_kr:
     name: "Samsung Newsroom Korea"
     status: EXPERIMENTAL

@@ -128,4 +128,21 @@ def classify(source: Source, article: DiscoveredArticle) -> FilterDecision:
             return FilterDecision(False, "threat_intelligence_item")
         if not any(term in title for term in SEMI_DISPLAY_SIGNAL_TERMS):
             return FilterDecision(False, "no_semiconductor_or_display_signal")
+    if source.id == "sk_hynix_newsroom_global":
+        # SK hynix's WordPress emits contentless sibling posts beside each real
+        # story: the parent's exact title, but their own post id and URL
+        # (.../ai-ecosystem-series-ep2-1/, -2, -3 ...), carrying neither
+        # content:encoded nor description. In the 2026-09-04 feed 8 of the 10
+        # items were these -- only ?p=12926 (31KB) and ?p=12572 (23KB) were
+        # articles. Accepting them would report ten new stories on a day two
+        # broke, and would manufacture fresh novelty every time the publisher
+        # added another fragment. An item carrying no text at all is not an
+        # article.
+        #
+        # Deliberately narrow, and deliberately scoped to this source: it drops
+        # only items with no body whatsoever, and the blocked Korean edition is
+        # untouched (its variants do carry bodies, so this rule would not fire
+        # there even if it were applied).
+        if not (article.body_original or "").strip():
+            return FilterDecision(False, "contentless_duplicate_post")
     return FilterDecision(True, "accepted")
