@@ -133,12 +133,38 @@ def iso(value: datetime | None = None) -> str:
     return (value or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
 
 def health_failure_classification(note: str | None) -> str:
-    """Classify retained historical failures without overwriting their evidence."""
+    """Classify retained historical failures without overwriting their evidence.
+
+    Four outcomes, because "we could not collect" has four different meanings
+    and they lead an operator to four different actions:
+
+    environment            our own side failed to make the request at all
+                           (socket refused, unreachable, timeout)
+    intentional_development a human stopped the run
+    access_blocked         the endpoint answered and deliberately refused us
+                           (401/403/429). The publisher is up and serving; we
+                           are the ones being turned away
+    source_or_parser       the publisher served something, and it or our
+                           parsing of it is broken
+
+    access_blocked exists because collapsing it into source_or_parser tells the
+    operator the publisher's site or our parser is broken, and sends them to
+    fix the wrong thing. sk_hynix_newsroom accumulated 844 "source failures"
+    that way while news.skhynix.co.kr was up the whole time, serving valid RSS
+    to any client except the one IP the deployment host egresses from.
+
+    This is a reclassification, never a suppression: the run still fails, the
+    verbatim error is still retained, the source still reports as failing, and
+    an access-blocked failure still breaks a consecutive-success streak exactly
+    as before -- it is a genuine inability to collect, not a transient blip.
+    """
     text = (note or "").casefold()
     if any(token in text for token in ("winerror 10013", "failed to connect", "network is unreachable", "connection refused", "timed out")):
         return "environment"
     if any(token in text for token in ("keyboardinterrupt", "intentionally aborted", "development run")):
         return "intentional_development"
+    if any(token in text for token in ("http error 401", "http error 403", "http error 429", "403: forbidden", "401: unauthorized", "429: too many requests")):
+        return "access_blocked"
     return "source_or_parser"
 
 class Database:
@@ -308,6 +334,7 @@ class Database:
             source_failures = sum(not row["success"] and health_failure_classification(row["health_note"]) == "source_or_parser" for row in history) + sum(health_failure_classification(row["message"]) == "source_or_parser" for row in historical_errors)
             environment_failures = sum(not row["success"] and health_failure_classification(row["health_note"]) == "environment" for row in history) + sum(health_failure_classification(row["message"]) == "environment" for row in historical_errors)
             intentional = sum(not row["success"] and health_failure_classification(row["health_note"]) == "intentional_development" for row in history)
+            access_blocked = sum(not row["success"] and health_failure_classification(row["health_note"]) == "access_blocked" for row in history) + sum(health_failure_classification(row["message"]) == "access_blocked" for row in historical_errors)
             consecutive_successes = 0
             for row in history:
                 if row["success"]: consecutive_successes += 1
@@ -319,6 +346,7 @@ class Database:
             summaries.append({
                 "source_id": source_id, "runs": len(history), "recent_runs": len(recent), "successes": sum(row["success"] for row in history),
                 "source_failures": source_failures, "environment_failures": environment_failures, "intentional_development_failures": intentional,
+                "access_blocked_failures": access_blocked,
                 "consecutive_successes": consecutive_successes, "last_success": last_success["attempted_at"] if last_success else None,
                 "last_failure": max(last_failure["attempted_at"] if last_failure else "", historical_last_failure or "") or None, "latest_references": latest["references_discovered"] if latest else None,
                 "latest_accepted": latest["accepted"] if latest else None, "latest_rejected": latest["rejected"] if latest else None,

@@ -66,7 +66,7 @@ def main() -> None:
         for summary in database.health_summary(requested, args.recent):
             source = source_map.get(summary["source_id"])
             lifecycle = source.status if source else "UNKNOWN"
-            print(f"{summary['source_id']} [{lifecycle}] runs={summary['runs']} success={summary['successes']} source_failures={summary['source_failures']} environment_failures={summary['environment_failures']} consecutive_successes={summary['consecutive_successes']}")
+            print(f"{summary['source_id']} [{lifecycle}] runs={summary['runs']} success={summary['successes']} source_failures={summary['source_failures']} environment_failures={summary['environment_failures']} access_blocked={summary['access_blocked_failures']} consecutive_successes={summary['consecutive_successes']}")
             print(f"  latest refs={summary['latest_references']} accepted={summary['latest_accepted']} rejected={summary['latest_rejected']} timestamped={summary['latest_timestamped']} extraction_failures={summary['latest_extraction_failures']} unexpected_zero={summary['unexpected_zero_events']}")
             print(f"  last_success={summary['last_success'] or '-'} last_failure={summary['last_failure'] or '-'}")
             due_state = database.source_due_state(summary["source_id"])
